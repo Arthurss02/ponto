@@ -16,17 +16,12 @@ guarda tudo. Configuracao por variavel de ambiente:
 Tudo isso tambem pode ir num arquivo ponto.env na raiz do projeto
 (CHAVE=valor por linha); variavel de ambiente de verdade ganha do arquivo.
 
-Este arquivo e o Ponto de UMA maquina: nao sabe o que e um central. Mandar
-os turnos pra um central e ser controlado por ele e tudo opcional e mora em
-servidor/sincronizacao.py, que se registra pelos GANCHOS daqui (procure por
-GANCHOS). Apague aquele arquivo e isto aqui continua funcionando sozinho.
-
 SEGURANCA: todo ponto do codigo que protege alguma coisa tem um comentario
 comecando com "SEGURANCA:". Pra ver todos:  grep -rn SEGURANCA servidor web
-Resumo (deste arquivo): so entrega arquivos de uma lista fechada; SQL sempre
+Resumo: so entrega arquivos de uma lista fechada; SQL sempre
 com parametro, dentro de um lock; tamanho de tudo que entra e limitado; com
-PONTO_SENHA, tudo pede login (cookie HMAC ou Bearer). A seguranca do lado
-central (nao executar shell, 403 sem senha, etc.) fica em sincronizacao.py.
+PONTO_SENHA, tudo pede login (cookie HMAC ou Bearer). Nao executa shell nem
+nada do sistema: nao ha os.system, subprocess, eval ou exec neste arquivo.
 
 Regras que valem estar escritas:
  - a semana comeca na SEGUNDA 00:00. Domingo a noite ainda e a semana velha.
@@ -90,24 +85,6 @@ TEMAS_PADRAO = ["Trabalho", "Estudo"]
 
 _trava = threading.Lock()
 
-# Ganchos: a extensao opcional (sincronizacao.py) se pendura aqui. Sem ela,
-# todas as listas ficam vazias e o Ponto roda como maquina unica.
-#   banco(c)  -> cria tabelas extras no cria_banco
-#   semana(s) -> acrescenta campos ao /api/semana
-#   rota(h, metodo, u, dados) -> trata rotas extras; True se tratou
-#   mudou()   -> avisado depois de cada mudanca (bater, turno, tema, meta)
-#   subir()   -> chamado no main() pra ligar threads
-GANCHOS = {"banco": [], "semana": [], "rota": [], "mudou": [], "subir": []}
-
-
-def registra(evento, fn):
-    GANCHOS[evento].append(fn)
-
-
-def avisa_mudanca():
-    for fn in GANCHOS["mudou"]:
-        fn()
-
 
 # ------------------------------------------------------------------ banco
 
@@ -144,20 +121,9 @@ def cria_banco():
             obs TEXT DEFAULT '',
             tema TEXT DEFAULT '')""")
         c.execute("CREATE INDEX IF NOT EXISTS ix_turnos_inicio ON turnos(inicio)")
-        # origem/id_origem: turno recebido de outra maquina (origem = nome dela).
-        # Os turnos desta maquina tem origem ''. Quem preenche isso e o
-        # sincronizacao.py; aqui as colunas existem pra que um turno recebido
-        # apareca certo no painel e so a maquina de origem possa conserta-lo.
-        cols = [r["name"] for r in c.execute("PRAGMA table_info(turnos)")]
-        if "origem" not in cols:
-            c.execute("ALTER TABLE turnos ADD COLUMN origem TEXT NOT NULL DEFAULT ''")
-        if "id_origem" not in cols:
-            c.execute("ALTER TABLE turnos ADD COLUMN id_origem INTEGER")
         c.execute("""CREATE TABLE IF NOT EXISTS ajustes (
             chave TEXT PRIMARY KEY,
             valor TEXT NOT NULL)""")
-    for fn in GANCHOS["banco"]:   # tabelas da extensao, se houver
-        fn()
 
 
 def ajuste(c, chave, padrao=None):
@@ -249,9 +215,8 @@ def inicio_da_semana(quando=None):
 
 
 def turno_aberto(c):
-    # so o daqui: o cronometro que esta rodando em outra maquina nao e este
     return c.execute(
-        "SELECT * FROM turnos WHERE fim IS NULL AND origem='' ORDER BY inicio DESC LIMIT 1").fetchone()
+        "SELECT * FROM turnos WHERE fim IS NULL ORDER BY inicio DESC LIMIT 1").fetchone()
 
 
 def hora_da_batida(quando, agora):
@@ -318,7 +283,7 @@ def bate_ponto(acao, tema=None, quando=None):
                 # batida atrasada nao pode comecar dentro de um turno que ja
                 # fechou depois dela: seria hora contada duas vezes
                 r = c.execute("SELECT MAX(fim) AS f FROM turnos"
-                              " WHERE fim IS NOT NULL AND fim > ? AND origem=''",
+                              " WHERE fim IS NOT NULL AND fim > ?",
                               (t_bat,)).fetchone()
                 if r and r["f"]:
                     t_bat = min(max(t_bat, r["f"]), agora)
@@ -415,9 +380,6 @@ def muda_turno(tid, campos):
     if not sets:
         return None
     with conexao() as c:
-        # SEGURANCA: turno que veio de outra maquina nao se edita aqui.
-        if c.execute("SELECT 1 FROM turnos WHERE id=? AND origem<>''", (tid,)).fetchone():
-            return None   # veio de outra maquina: o proximo envio desfaria o conserto
         # SEGURANCA: o UPDATE e montado so com nomes de coluna fixos (inicio, fim,
         #   obs, tema) escritos acima; os valores vao como parametro "?".
         c.execute("UPDATE turnos SET " + ",".join(sets) + " WHERE id=?", vals + [tid])
@@ -431,31 +393,28 @@ def muda_turno(tid, campos):
 
 def apaga_turno(tid):
     with conexao() as c:
-        # SEGURANCA: so apaga turno desta maquina, nunca um recebido.
-        return c.execute("DELETE FROM turnos WHERE id=? AND origem=''", (tid,)).rowcount > 0
+        return c.execute("DELETE FROM turnos WHERE id=?", (tid,)).rowcount > 0
 
 
 def turnos_da_semana(ini):
     ini = inicio_da_semana(ini)
     with conexao() as c:
         linhas = [dict(r) for r in c.execute(
-            "SELECT id,inicio,fim,obs,tema,origem FROM turnos"
+            "SELECT id,inicio,fim,obs,tema FROM turnos"
             " WHERE inicio>=? AND inicio<? ORDER BY inicio", (ini, inicio_da_semana(ini + 8 * 86400)))]
     return {"inicio_semana": ini, "turnos": linhas}
 
 
 def exporta_csv():
     with conexao() as c:
-        linhas = list(c.execute("SELECT id,inicio,fim,tema,obs,origem FROM turnos ORDER BY inicio"))
+        linhas = list(c.execute("SELECT id,inicio,fim,tema,obs FROM turnos ORDER BY inicio"))
     s = io.StringIO()
     w = csv.writer(s)
-    w.writerow(["id", "inicio", "fim", "horas", "tema", "obs", "maquina"])
+    w.writerow(["id", "inicio", "fim", "horas", "tema", "obs"])
     fmt = lambda t: datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else ""
     for r in linhas:
         horas = "" if r["fim"] is None else "%.2f" % ((r["fim"] - r["inicio"]) / 3600.0)
-        # turno recebido mostra a maquina de origem; o desta maquina fica em branco
-        w.writerow([r["id"], fmt(r["inicio"]), fmt(r["fim"]), horas, r["tema"], r["obs"],
-                    r["origem"] or ""])
+        w.writerow([r["id"], fmt(r["inicio"]), fmt(r["fim"]), horas, r["tema"], r["obs"]])
     return s.getvalue()
 
 
@@ -519,7 +478,7 @@ def semana(quando=None):
         except (TypeError, ValueError):
             meta = META_PADRAO
         linhas = [dict(r) for r in c.execute(
-            "SELECT id,inicio,fim,obs,tema,origem FROM turnos"
+            "SELECT id,inicio,fim,obs,tema FROM turnos"
             " WHERE inicio>=? AND inicio<? ORDER BY inicio", (ini, fim_semana))]
         lista_temas = temas(c)
         fora = set(t for t in temas_fora(c) if t in lista_temas)
@@ -559,9 +518,7 @@ def semana(quando=None):
             por_dia_fora[dia] += dur / 3600.0
         else:
             total += dur
-            # turno aberto de outra maquina entra como fechado ate agora: a
-            # tela so faz andar o cronometro DAQUI
-            if t["fim"] is not None or t.get("origem"):
+            if t["fim"] is not None:
                 fechadas += dur
                 if dia == hoje_i:
                     fechadas_hoje += dur
@@ -792,8 +749,6 @@ class Ponto(BaseHTTPRequestHandler):
         if u.path == "/api/semana":
             s = semana()
             s["com_senha"] = bool(SENHA)   # o painel so mostra "Sair" se houver
-            for fn in GANCHOS["semana"]:   # a extensao poe "envio" aqui, se houver
-                fn(s)
             return self._json(200, s)
         if u.path == "/api/historico":
             n = max(1, min(104, _inteiro((q.get("n") or [""])[0]) or 12))
@@ -805,8 +760,6 @@ class Ponto(BaseHTTPRequestHandler):
             nome = "ponto-%s.csv" % datetime.date.today().isoformat()
             return self._envia(200, exporta_csv(), "text/csv; charset=utf-8",
                                {"Content-Disposition": 'attachment; filename="%s"' % nome})
-        if self._rota_extra("GET", u, q):   # /api/maquinas, /api/comandos (extensao)
-            return
         return self._json(404, {"erro": "rota desconhecida"})
 
     def do_POST(self):
@@ -825,7 +778,6 @@ class Ponto(BaseHTTPRequestHandler):
             if acao not in ("entra", "sai", "alterna", "troca"):
                 return self._json(400, {"erro": "acao: entra, sai, alterna ou troca"})
             r = bate_ponto(acao, d.get("tema"), d.get("quando"))
-            avisa_mudanca()       # a extensao manda pro central ja, se houver
             r["semana"] = semana()
             r["texto"] = texto_ponto(r, r["semana"])
             return self._json(200, r)
@@ -833,7 +785,6 @@ class Ponto(BaseHTTPRequestHandler):
             tid = cria_turno(d)
             if not tid:
                 return self._json(400, {"erro": "precisa de inicio"})
-            avisa_mudanca()
             return self._json(201, {"ok": True, "id": tid, "semana": semana()})
         if u.path == "/api/temas":
             return self._json(200, {"ok": True, "temas": muda_temas(d.get("temas")),
@@ -847,17 +798,7 @@ class Ponto(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self._json(400, {"erro": "horas invalidas"})
             return self._json(200, {"ok": True, "meta": h, "semana": semana()})
-        if self._rota_extra("POST", u, d):   # /api/receber, /api/comandos* (extensao)
-            return
         return self._json(404, {"erro": "rota desconhecida"})
-
-    def _rota_extra(self, metodo, u, dados):
-        # SEGURANCA: so roda depois do _porta_fechada (login). As rotas do central
-        #   que precisam de senha propria fazem o 403 la em sincronizacao.py.
-        for fn in GANCHOS["rota"]:
-            if fn(self, metodo, u, dados):
-                return True
-        return False
 
     def _id_turno(self, u):
         partes = [p for p in u.path.split("/") if p]
@@ -877,9 +818,8 @@ class Ponto(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return self._json(400, {"erro": "corpo invalido"})
         t = muda_turno(tid, d)
-        avisa_mudanca()
         return self._json(200 if t else 400, {"ok": bool(t), "turno": t, "semana": semana(),
-                                              "erro": None if t else "turno de outra maquina: conserte la"})
+                                              "erro": None if t else "turno nao encontrado"})
 
     def do_DELETE(self):
         u = urlparse(self.path)
@@ -889,8 +829,7 @@ class Ponto(BaseHTTPRequestHandler):
         if not tid:
             return self._json(404, {"erro": "rota desconhecida"})
         if not apaga_turno(tid):
-            return self._json(400, {"erro": "turno de outra maquina: apague la"})
-        avisa_mudanca()
+            return self._json(404, {"erro": "turno nao encontrado"})
         return self._json(200, {"ok": True, "semana": semana()})
 
     def _entrar(self, d):
@@ -928,22 +867,10 @@ def main():
         # SEGURANCA: avisa no terminal quando esta aberto pra rede sem senha.
         print("AVISO: sem PONTO_SENHA e escutando na rede. Em casa/Tailscale tudo bem;"
               " numa VPS defina PONTO_SENHA e ponha HTTPS na frente.", flush=True)
-    for fn in GANCHOS["subir"]:   # a extensao liga os lacos de envio/comandos
-        fn()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
-
-
-# Extensao opcional: se servidor/sincronizacao.py existir, ele se registra nos
-# GANCHOS acima. Se nao existir, o Ponto roda como maquina unica. (find_spec
-# evita esconder erro de dentro do proprio sincronizacao.py num ImportError.)
-import importlib.util   # noqa: E402
-
-if importlib.util.find_spec("sincronizacao"):
-    import sincronizacao   # noqa: E402
-    sincronizacao.instalar(sys.modules[__name__])
 
 
 if __name__ == "__main__":

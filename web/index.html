@@ -36,10 +36,6 @@
   .con i{width:7px;height:7px;border-radius:50%;background:var(--dim2)}
   .con.on i{background:var(--ok)}
   .con.off{color:var(--warn)} .con.off i{background:var(--warn)}
-  .envio{font-size:12px;color:var(--dim);padding:3px 10px;border-radius:99px;border:1px solid var(--line);background:var(--card)}
-  .envio.erro{color:var(--warn);border-color:#efdcaa;background:var(--warn-bg)}
-  .tabela .maq{display:inline-block;font-size:11px;color:var(--dim);border:1px solid var(--line2);border-radius:99px;padding:0 7px;margin-left:6px}
-  .tabela .ro{color:var(--dim)}
   .topo .links{margin-left:auto;display:flex;gap:14px;font-size:13px}
   .topo .links a{color:var(--dim);text-decoration:none}
   .topo .links a:hover{color:var(--txt)}
@@ -134,23 +130,6 @@
   .tema-linha input[type=text]{flex:1}
   .tema-linha label{display:flex;flex-direction:row;align-items:center;gap:5px;white-space:nowrap}
 
-  /* outras maquinas */
-  .maquinas{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
-  .maq-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--card2);display:grid;gap:10px}
-  .maq-topo{display:flex;align-items:baseline;gap:8px}
-  .maq-topo b{font-size:15px}
-  .maq-topo span{font-size:12px;color:var(--dim)}
-  .maq-topo .on{margin-left:auto;font-size:11.5px;color:var(--ok);font-weight:650}
-  .maq-topo .off{margin-left:auto;font-size:11.5px;color:var(--dim)}
-  .maq-estado{display:flex;align-items:center;gap:8px;font-weight:650}
-  .maq-estado i{width:10px;height:10px;border-radius:3px}
-  .maq-estado .num{margin-left:auto;font-size:20px}
-  .maq-bts{display:flex;flex-wrap:wrap;gap:6px}
-  .maq-bts .bt{padding:7px 11px;font-size:13px}
-  .maq-bts .bt.parar{padding:8px 14px}
-  .maq-hist{font-size:12px;color:var(--dim);display:grid;gap:3px}
-  .maq-hist .ok{color:var(--ok)} .maq-hist .erro{color:var(--bad)} .maq-hist .esp{color:var(--warn)}
-  .maq-nota{font-size:12px;color:var(--dim)}
   .aviso{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
     background:var(--txt);color:#fff;padding:11px 16px;border-radius:12px;font-size:13.5px;transition:.2s}
   .aviso.ve{transform:translate(-50%,0);opacity:1}
@@ -162,7 +141,6 @@
   <div class="topo">
     <h1><img src="icone-192.png" alt="">Ponto</h1>
     <div class="con" id="con"><i></i><span>conectando</span></div>
-    <div class="envio" id="envio" hidden></div>
     <div class="links">
       <a href="app">App do celular</a>
       <a href="api/exportar.csv">Exportar CSV</a>
@@ -179,11 +157,6 @@
       <div class="colunas hist" id="hist"></div>
     </section>
   </div>
-
-  <section class="bloco" id="maquinas-bloco" hidden>
-    <h2>Outras máquinas <small>mandam os turnos pra cá</small></h2>
-    <div class="maquinas" id="maquinas"></div>
-  </section>
 
   <section class="bloco">
     <h2>Dia a dia <small>barra listrada = tema que não conta na meta</small></h2>
@@ -237,7 +210,7 @@ var W=null, ONLINE=null, SEM_TURNOS=null, VISTA=null, TURNOS=[];
 
 function $(id){ return document.getElementById(id); }
 function agora(){ return Math.floor(Date.now()/1000); }
-/* SEGURANCA: todo texto que vem do servidor (tema, anotacao, nome de maquina)
+/* SEGURANCA: todo texto que vem do servidor (tema, anotacao)
    passa por esc() antes de ir pro innerHTML. Sem isso, um tema chamado
    <img onerror=...> rodaria script no seu painel. */
 function esc(t){
@@ -435,16 +408,6 @@ function pintaTurnos(){
   $("turnos").innerHTML='<tr><th>Dia</th><th>Início</th><th>Fim</th><th>Duração</th><th>Tema</th><th>Anotação</th><th></th></tr>'+
     TURNOS.map(function(x){
       var dur = (x.fim||t)-x.inicio;
-      /* SEGURANCA: turno de outra maquina aparece sem campos editaveis (e o
-         servidor recusa a edicao de qualquer jeito). */
-      if(x.origem){
-        /* veio de outra maquina: so ela conserta, senao o proximo envio desfaz */
-        return '<tr title="Turno de '+esc(x.origem)+' — conserte lá">'+
-          '<td>'+DIAS[(new Date(x.inicio*1000).getDay()+6)%7]+' '+ddmm(x.inicio)+'<span class="maq">'+esc(x.origem)+'</span></td>'+
-          '<td class="ro num">'+hhmm(x.inicio)+'</td><td class="ro num">'+(x.fim?hhmm(x.fim):'—')+'</td>'+
-          '<td class="dur num'+(x.fim?'':' rodando')+'">'+(x.fim?hm(dur/3600):'rodando')+'</td>'+
-          '<td class="ro">'+esc(x.tema)+'</td><td class="ro">'+esc(x.obs)+'</td><td></td></tr>';
-      }
       return '<tr data-id="'+x.id+'">'+
         '<td>'+DIAS[(new Date(x.inicio*1000).getDay()+6)%7]+' '+ddmm(x.inicio)+'</td>'+
         '<td><input type="datetime-local" data-campo="inicio" value="'+local(x.inicio)+'" aria-label="Início"></td>'+
@@ -549,109 +512,16 @@ function pintaCon(){
   c.className="con "+(ONLINE===true?"on":ONLINE===false?"off":"");
   c.querySelector("span").textContent = ONLINE===true?"ao vivo":ONLINE===false?"sem conexão":"conectando";
 }
-function pintaEnvio(){
-  var el=$("envio"), e=W.envio;
-  el.hidden=!e; if(!e) return;
-  var host=e.destino.replace(/^https?:\/\//,"");
-  if(e.erro){
-    el.className="envio erro"; el.textContent="Não enviou pra "+host+": "+e.erro;
-  }else if(e.ultimo_ok){
-    var min=Math.max(0,Math.round((agora()-e.ultimo_ok)/60));
-    el.className="envio"; el.textContent="Enviado pra "+host+(min<1?" agora":" há "+min+" min");
-  }else{
-    el.className="envio"; el.textContent="Enviando pra "+host+"…";
-  }
-  if(e.comandos) el.textContent += " · controle remoto "+(e.ouvindo?"ligado":"desconectado");
-  el.title="Esta máquina aparece lá como “"+e.nome+"”";
-}
-
-/* ---------- outras maquinas (lado central) ---------- */
-var MAQ=[], ACOMPANHA=0;
-var NOMES_CMD={ponto:"ponto", lanca_turno:"lançar turno", muda_turno:"consertar turno",
-  apaga_turno:"apagar turno", temas:"temas", temas_fora:"não conta", meta:"meta"};
-function quandoTxt(ts){
-  if(!ts) return "nunca";
-  var m=Math.round((agora()-ts)/60);
-  if(m<1) return "agora"; if(m<60) return "há "+m+" min";
-  var h=Math.round(m/60); return h<48 ? "há "+h+" h" : "em "+ddmm(ts);
-}
-async function buscaMaquinas(){
-  try{ MAQ=(await api("GET","api/maquinas")).maquinas||[]; }catch(e){ return; }
-  pintaMaquinas();
-}
-function pintaMaquinas(){
-  $("maquinas-bloco").hidden=!MAQ.length;
-  if(!MAQ.length) return;
-  $("maquinas").innerHTML=MAQ.map(function(m){
-    var e=m.estado||{}, temas=e.temas||[], controla=m.ouvindo && e.aceita_comandos;
-    function bt(nome, acao){
-      return '<button class="bt" style="--c:'+cor(nome)+'" data-maq="'+esc(m.nome)+'" data-acao="'+acao+'" data-tema="'+esc(nome)+'">'+esc(nome)+'</button>';
-    }
-    var est = e.rodando
-      ? '<div class="maq-estado"><i style="background:'+cor(e.tema)+'"></i>'+esc(e.tema)+
-          '<span class="num" data-desde="'+e.desde+'">'+relogio(agora()-e.desde)+'</span></div>'
-      : '<div class="maq-estado" style="color:var(--dim)">Parado</div>';
-    var bts="";
-    if(controla){
-      bts = e.rodando
-        ? '<button class="bt parar" data-maq="'+esc(m.nome)+'" data-acao="sai">Parar</button>'+
-          temas.filter(function(x){ return x!==e.tema; }).map(function(x){ return bt(x,"troca"); }).join("")
-        : temas.map(function(x){ return bt(x,"entra"); }).join("");
-      bts='<div class="maq-bts">'+bts+'</div>';
-    }else{
-      bts='<div class="maq-nota">'+(e.aceita_comandos
-        ? 'Ouve comandos, mas não está conectada agora. O pedido fica na fila até ela voltar (vale 7 dias).'
-        : 'Só manda os turnos.')+'</div>';
-      if(e.aceita_comandos){
-        bts += '<div class="maq-bts">'+(e.rodando
-          ? '<button class="bt parar" data-maq="'+esc(m.nome)+'" data-acao="sai">Parar</button>'
-          : temas.map(function(x){ return bt(x,"entra"); }).join(""))+'</div>';
-      }
-    }
-    var hist=(m.comandos||[]).slice(0,4).map(function(c){
-      var d={}; try{ d=JSON.parse(c.dados||"{}"); }catch(_){}
-      var o=NOMES_CMD[c.acao]||c.acao;
-      if(c.acao==="ponto") o = d.acao==="sai"?"parar":(d.acao==="troca"?"trocar pra ":"começar ")+(d.tema||"");
-      var st = c.feito_em ? (c.ok ? '<span class="ok">'+esc(c.resultado||"feito")+'</span>' : '<span class="erro">'+esc(c.resultado||"falhou")+'</span>')
-        : c.entregue_em ? '<span class="esp">entregue, executando…</span>'
-        : '<span class="esp">na fila, esperando a máquina</span>';
-      return '<div>'+hhmm(c.criado_em)+' · '+esc(o)+' — '+st+'</div>';
-    }).join("");
-    return '<div class="maq-card"><div class="maq-topo"><b>'+esc(m.nome)+'</b>'+
-      '<span>enviou '+quandoTxt(m.ultimo_envio)+'</span>'+
-      (e.aceita_comandos ? (m.ouvindo?'<span class="on">ouvindo</span>':'<span class="off">desconectada</span>') : '')+
-      '</div>'+est+bts+(hist?'<div class="maq-hist">'+hist+'</div>':'')+'</div>';
-  }).join("");
-}
-$("maquinas").addEventListener("click", async function(ev){
-  var b=ev.target.closest("button[data-maq]"); if(!b) return;
-  b.disabled=true;
-  try{
-    await api("POST","api/comandos",{origem:b.dataset.maq, acao:"ponto",
-      dados:{acao:b.dataset.acao, tema:b.dataset.tema||null}});
-    aviso("Pedido enviado pra "+b.dataset.maq+".");
-    ACOMPANHA=15;   /* olha de perto ate a maquina responder */
-    buscaMaquinas();
-  }catch(e){ aviso("Não enviou: "+e.message); b.disabled=false; }
-});
-setInterval(function(){
-  if(ACOMPANHA>0){ ACOMPANHA--; buscaMaquinas(); }
-  [].forEach.call(document.querySelectorAll("#maquinas [data-desde]"), function(el){
-    el.textContent=relogio(agora()-(+el.dataset.desde));
-  });
-}, 2000);
-setInterval(function(){ if(!document.hidden) buscaMaquinas(); }, 20000);
 function tudo(forca){
   if(!W) return;
   $("sair").hidden=!W.com_senha;
-  pintaEnvio();
   pintaAgora(); pintaSemana(); pintaDias(); pintaHist(); pintaAjustes(forca);
 }
 async function busca(){
   try{
     var primeira=!W;
     W=await api("GET","api/semana"); ONLINE=true; tudo();
-    if(primeira){ carregaTurnos(); buscaMaquinas(); }
+    if(primeira) carregaTurnos();
   }catch(e){ ONLINE=false; }
   pintaCon();
 }

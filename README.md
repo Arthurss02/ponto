@@ -67,44 +67,6 @@ certificado sozinho — veja `extras/Caddyfile`. Com HTTPS o app do celular abre
 até sem internet (service worker) e o cookie de login vai só por conexão segura.
 Nesse caso deixe o Ponto escutando só local: `PONTO_HOST=127.0.0.1`.
 
-## Várias máquinas mandando pra um Ponto central
-
-Cada lugar (notebook, PC do trabalho, VPS) roda o seu Ponto e funciona sozinho,
-mesmo sem internet. Se você quiser ver tudo junto num lugar só, aponte essas
-máquinas pra um **Ponto central** — que é este mesmo programa, rodando com
-`PONTO_SENHA` num endereço com HTTPS.
-
-Numa máquina nova:
-
-```bash
-git clone https://github.com/Arthurss02/ponto.git && cd ponto
-cp ponto.env.exemplo ponto.env      # preencha PONTO_ENVIAR_PARA e PONTO_ENVIAR_SENHA
-python3 servidor/ponto.py
-```
-
-- Envia a cada 5 minutos (`PONTO_ENVIAR_A_CADA`) e também logo depois de cada
-  batida ou conserto. Sem rede, tenta de novo no próximo ciclo; nada se perde.
-- A primeira vez manda o histórico inteiro; depois, as últimas 5 semanas.
-  Conserto e turno apagado aqui chegam lá; mandar duas vezes não duplica.
-- No central, cada turno aparece com o nome da máquina (`PONTO_NOME`, padrão o
-  nome do computador) e só pode ser consertado na máquina de origem.
-- O topo do painel mostra se o último envio deu certo.
-- Desligado por padrão: quem clonar o repositório não manda nada pra lugar
-  nenhum sem configurar. O endereço do central é você que escolhe.
-
-### Comandos do central (execução desligada)
-
-Com `PONTO_ACEITAR_COMANDOS=1` no `ponto.env` de uma máquina, ela fica
-ouvindo o central e aparece com o status "ouvindo" no painel dele, em
-**Outras máquinas**. Os botões de lá põem um pedido na fila, e a máquina
-recebe e confirma em 1–2 segundos — mas **não executa nada**: a resposta
-é "recebido (execução desligada)".
-
-A estrutura inteira continua pronta (fila, conexão que espera até 25 s,
-execução única, resultado de volta), e só a função `executa_comando` em
-`servidor/sincronizacao.py` está vazia. Pra ligar algum comando no futuro, é
-ali, chamando sempre funções do Ponto — nunca o sistema operacional.
-
 ## Pôr o app na tela de início do celular
 
 - **iPhone:** abra `/app` no Safari → botão Compartilhar → **Adicionar à Tela de Início**.
@@ -142,11 +104,6 @@ Tudo por variável de ambiente:
 | `PONTO_SENHA` | vazio | pede senha em tudo. Trocar a senha desloga todos os aparelhos |
 | `TZ` | do sistema | fuso: a semana vira na segunda 00:00 deste fuso |
 | `PONTO_LOG` | vazio | qualquer valor liga o log de cada requisição |
-| `PONTO_ENVIAR_PARA` | vazio | endereço do Ponto central (liga o envio) |
-| `PONTO_ENVIAR_SENHA` | vazio | a `PONTO_SENHA` do central |
-| `PONTO_ENVIAR_A_CADA` | `300` | segundos entre envios (mínimo 30) |
-| `PONTO_NOME` | nome do PC | como esta máquina aparece no central |
-| `PONTO_ACEITAR_COMANDOS` | vazio | `1` faz a máquina receber os pedidos do central (sem executar) |
 
 Tudo isso também pode ficar num arquivo `ponto.env` na pasta do projeto
 (veja `ponto.env.exemplo`).
@@ -193,18 +150,10 @@ CSV (link **Exportar CSV**).
 | `POST /api/meta` | `{"horas": 40}` |
 | `GET /api/historico?n=12` | horas das últimas n semanas |
 | `GET /api/exportar.csv` | tudo em CSV |
-| `POST /api/receber` | (central) `{"origem", "desde", "turnos": [...], "estado"}` — troca os turnos daquela máquina a partir de `desde` |
-| `GET /api/maquinas` | (central) máquinas, o que está rodando em cada uma e os últimos comandos |
-| `POST /api/comandos` | (central) põe um comando na fila de uma máquina |
-| `GET /api/comandos?origem=X&espera=25` | (máquina) busca comandos, esperando até 25 s |
-| `POST /api/comandos/resultado` | (máquina) devolve o resultado |
 
 ## Desenvolvimento
 
-O Ponto de uma máquina é o `servidor/ponto.py`; tudo sobre o central (enviar,
-receber, comandos) e a segurança disso fica separado em
-`servidor/sincronizacao.py` — apague esse arquivo e o Ponto roda sozinho. O
-que cada arquivo faz e as verificações de segurança: [`ARQUIVOS.md`](ARQUIVOS.md).
+O que cada arquivo faz e as verificações de segurança: [`ARQUIVOS.md`](ARQUIVOS.md).
 
 Pra testar sem encostar no seu banco de verdade, rode com outro arquivo:
 `PONTO_BANCO=/tmp/teste.db python3 servidor/ponto.py`.
