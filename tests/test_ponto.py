@@ -184,6 +184,48 @@ class VariasMaquinas(Base):
             ponto.receber({"turnos": []})
 
 
+class Comandos(Base):
+    def test_so_acoes_do_ponto(self):
+        with self.assertRaises(ValueError):
+            ponto.enfileira_comando("notebook", "shell", {"cmd": "rm -rf /"})
+        self.assertFalse(ponto.executa_comando({"acao": "shell", "dados": {}})["ok"])
+        self.assertFalse(ponto.executa_comando({"acao": "ponto", "dados": {"acao": "voar"}})["ok"])
+
+    def test_central_entrega_e_marca_feito(self):
+        cid = ponto.enfileira_comando("notebook", "ponto", {"acao": "entra", "tema": "Estudo"})
+        lista = ponto.busca_comandos("notebook", 0)
+        self.assertEqual([c["id"] for c in lista], [cid])
+        self.assertEqual(lista[0]["dados"]["tema"], "Estudo")
+        respostas = ponto.atende_comandos(lista)      # aqui o mesmo banco faz a maquina
+        self.assertTrue(respostas[0]["ok"])
+        self.assertTrue(ponto.semana()["rodando"])
+        self.assertEqual(ponto.registra_resultados("notebook", respostas), 1)
+        self.assertEqual(ponto.busca_comandos("notebook", 0), [])
+        m = ponto.maquinas()[0]
+        self.assertEqual(m["nome"], "notebook")
+        self.assertEqual(m["comandos"][0]["ok"], 1)
+
+    def test_comando_repetido_executa_uma_vez(self):
+        cmd = {"id": 7, "acao": "lanca_turno", "criado_em": 0,
+               "dados": {"inicio": ts(2026, 10, 5, 8), "fim": ts(2026, 10, 5, 9)}}
+        ponto.atende_comandos([cmd])
+        ponto.atende_comandos([cmd])                  # a resposta tinha se perdido
+        self.assertEqual(len(self.turnos()), 1)
+
+    def test_get_pendurado_acorda_quando_chega_comando(self):
+        threading.Timer(0.5, ponto.enfileira_comando, ("pc", "meta", {"horas": 30})).start()
+        t0 = time.time()
+        lista = ponto.busca_comandos("pc", 10)
+        self.assertEqual(len(lista), 1)
+        self.assertLess(time.time() - t0, 3)
+
+    def test_ponto_usa_a_hora_do_clique(self):
+        clique = int(time.time()) - 1800
+        ponto.atende_comandos([{"id": 1, "acao": "ponto", "criado_em": clique,
+                                "dados": {"acao": "entra", "tema": "Trabalho"}}])
+        self.assertEqual(self.turnos()[0]["inicio"], clique)
+
+
 class Http(Base):
     @classmethod
     def setUpClass(cls):
@@ -233,6 +275,8 @@ class Http(Base):
 
     def test_central_sem_senha_nao_recebe(self):
         self.assertEqual(self.pede("POST", "/api/receber", {"origem": "x", "turnos": []})[0], 403)
+        self.assertEqual(self.pede("GET", "/api/comandos?origem=x")[0], 403)
+        self.assertEqual(self.pede("POST", "/api/comandos", {"origem": "x", "acao": "meta"})[0], 403)
 
     def test_envio_chega_no_central(self):
         ponto.SENHA = "central"

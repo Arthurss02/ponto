@@ -18,6 +18,9 @@ guarda tudo. Configuracao por variavel de ambiente:
     PONTO_ENVIAR_SENHA  a PONTO_SENHA do central
     PONTO_ENVIAR_A_CADA segundos entre envios (padrao 300)
     PONTO_NOME          nome desta maquina no central (padrao: hostname)
+    PONTO_ACEITAR_COMANDOS=1  deixa o central controlar esta maquina
+                        (bater ponto, lancar/consertar/apagar turno, temas,
+                        meta). So acoes do Ponto - nunca comando de sistema.
 
 Tudo isso tambem pode ir num arquivo ponto.env na raiz do projeto
 (CHAVE=valor por linha); variavel de ambiente de verdade ganha do arquivo.
@@ -46,7 +49,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -79,6 +82,8 @@ DESTINO = (os.environ.get("PONTO_ENVIAR_PARA") or "").strip().rstrip("/")
 DESTINO_SENHA = os.environ.get("PONTO_ENVIAR_SENHA") or ""
 ENVIAR_A_CADA = max(30, int(os.environ.get("PONTO_ENVIAR_A_CADA") or 300))
 NOME = (os.environ.get("PONTO_NOME") or socket.gethostname().split(".")[0] or "ponto")[:40]
+ACEITA_COMANDOS = (os.environ.get("PONTO_ACEITAR_COMANDOS") or "").strip().lower() in (
+    "1", "sim", "s", "true", "yes")
 
 META_PADRAO = 40.0            # horas por semana; cada um muda no painel
 TURNO_ESQUECIDO = 16 * 3600   # aberto mais que isso e esquecimento, nao jornada
@@ -129,6 +134,29 @@ def cria_banco():
             c.execute("ALTER TABLE turnos ADD COLUMN origem TEXT NOT NULL DEFAULT ''")
         if "id_origem" not in cols:
             c.execute("ALTER TABLE turnos ADD COLUMN id_origem INTEGER")
+        # lado central: as maquinas que mandam pra ca e a fila de comandos
+        c.execute("""CREATE TABLE IF NOT EXISTS maquinas (
+            nome TEXT PRIMARY KEY,
+            ultimo_envio INTEGER,
+            ultimo_pedido INTEGER,
+            estado TEXT DEFAULT '{}')""")
+        c.execute("""CREATE TABLE IF NOT EXISTS comandos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            origem TEXT NOT NULL,
+            acao TEXT NOT NULL,
+            dados TEXT NOT NULL DEFAULT '{}',
+            criado_em INTEGER NOT NULL,
+            entregue_em INTEGER,
+            feito_em INTEGER,
+            ok INTEGER,
+            resultado TEXT DEFAULT '')""")
+        c.execute("CREATE INDEX IF NOT EXISTS ix_comandos_origem ON comandos(origem, feito_em)")
+        # lado da maquina: o que ja foi executado, pra resposta perdida nao
+        # virar comando executado duas vezes
+        c.execute("""CREATE TABLE IF NOT EXISTS comandos_feitos (
+            id_central INTEGER PRIMARY KEY,
+            resposta TEXT NOT NULL,
+            quando INTEGER NOT NULL)""")
         c.execute("""CREATE TABLE IF NOT EXISTS ajustes (
             chave TEXT PRIMARY KEY,
             valor TEXT NOT NULL)""")
@@ -454,11 +482,30 @@ def receber(d):
             fim = ini
         limpos.append((ini, fim, str(t.get("obs") or "")[:120], limpa_nome(t.get("tema")),
                        origem, _inteiro(t.get("id"))))
+    estado = d.get("estado") if isinstance(d.get("estado"), dict) else {}
     with conexao() as c:
         c.execute("DELETE FROM turnos WHERE origem=? AND inicio>=?", (origem, desde))
         c.executemany("INSERT INTO turnos (inicio,fim,obs,tema,origem,id_origem)"
                       " VALUES (?,?,?,?,?,?)", limpos)
+        c.execute("INSERT INTO maquinas (nome,ultimo_envio,estado) VALUES (?,?,?)"
+                  " ON CONFLICT(nome) DO UPDATE SET ultimo_envio=excluded.ultimo_envio,"
+                  " estado=excluded.estado",
+                  (origem, int(time.time()), json.dumps(estado, ensure_ascii=False)[:4000]))
     return {"ok": True, "origem": origem, "recebidos": len(limpos)}
+
+
+def pede_central(metodo, caminho, corpo=None, timeout=20):
+    cab = {"User-Agent": "Ponto/1"}
+    dados = None
+    if corpo is not None:
+        dados = json.dumps(corpo).encode("utf-8")
+        cab["Content-Type"] = "application/json"
+    if DESTINO_SENHA:
+        cab["Authorization"] = "Bearer " + DESTINO_SENHA
+    req = urllib.request.Request(DESTINO + caminho, data=dados, headers=cab, method=metodo)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        bruto = r.read()
+    return json.loads(bruto.decode("utf-8") or "{}") if bruto else {}
 
 
 def envia_uma_vez():
@@ -471,13 +518,12 @@ def envia_uma_vez():
         linhas = [dict(r) for r in c.execute(
             "SELECT id,inicio,fim,tema,obs FROM turnos WHERE origem='' AND inicio>=?"
             " ORDER BY inicio", (desde,))]
-    corpo = json.dumps({"origem": NOME, "desde": desde, "turnos": linhas}).encode("utf-8")
-    cab = {"Content-Type": "application/json", "User-Agent": "Ponto/1"}
-    if DESTINO_SENHA:
-        cab["Authorization"] = "Bearer " + DESTINO_SENHA
-    req = urllib.request.Request(DESTINO + "/api/receber", data=corpo, headers=cab, method="POST")
-    with urllib.request.urlopen(req, timeout=20) as r:
-        r.read()
+        ab = turno_aberto(c)
+        estado = {"rodando": bool(ab), "tema": (ab["tema"] if ab else ""),
+                  "desde": (ab["inicio"] if ab else None), "temas": temas(c),
+                  "aceita_comandos": ACEITA_COMANDOS}
+    pede_central("POST", "/api/receber",
+                 {"origem": NOME, "desde": desde, "turnos": linhas, "estado": estado})
     if completo:
         with conexao() as c:
             grava_ajuste(c, "envio_completo", DESTINO)
@@ -502,6 +548,197 @@ def laco_envio():
         if _acorda_envio.is_set():
             _acorda_envio.clear()
             time.sleep(3)   # junta "parou" + "comecou" de uma troca num envio so
+
+
+# ------------------------------------------------------------------ comandos do central
+#
+# O central nao alcanca a maquina (ela esta atras de roteador, 4G, rede de
+# outro lugar), entao e a maquina que pergunta: um GET que fica pendurado ate
+# 25 s no central e volta na hora em que chega um comando. Na pratica o botao
+# no painel do central bate o ponto da outra maquina em 1-2 segundos.
+#
+# A lista do que pode ser pedido e FECHADA e so mexe no Ponto. Nao existe
+# "rode este comando no sistema": quem invadisse o central teria todas as
+# maquinas na mao.
+
+COMANDOS = ("ponto", "lanca_turno", "muda_turno", "apaga_turno", "temas", "temas_fora", "meta")
+COMANDO_VALIDADE = 7 * 86400   # comando que a maquina nao buscou em 7 dias caduca
+ESPERA_MAX = 25
+_chegou_comando = threading.Condition()
+COMANDOS_ESTADO = {"conectado": False, "erro": None, "ultimo": None}
+
+
+def enfileira_comando(origem, acao, dados):
+    origem = str(origem or "").strip()[:40]
+    if not origem:
+        raise ValueError("falta a maquina (origem)")
+    if acao not in COMANDOS:
+        raise ValueError("comando desconhecido: use " + ", ".join(COMANDOS))
+    if not isinstance(dados, dict):
+        dados = {}
+    with conexao() as c:
+        cid = c.execute("INSERT INTO comandos (origem,acao,dados,criado_em) VALUES (?,?,?,?)",
+                        (origem, acao, json.dumps(dados, ensure_ascii=False)[:8000],
+                         int(time.time()))).lastrowid
+    with _chegou_comando:
+        _chegou_comando.notify_all()
+    return cid
+
+
+def _pendentes(c, origem):
+    agora = int(time.time())
+    linhas = [dict(r) for r in c.execute(
+        "SELECT id,acao,dados,criado_em FROM comandos WHERE origem=? AND feito_em IS NULL"
+        " AND criado_em>? ORDER BY id LIMIT 50", (origem, agora - COMANDO_VALIDADE))]
+    for l in linhas:
+        try:
+            l["dados"] = json.loads(l["dados"] or "{}")
+        except ValueError:
+            l["dados"] = {}
+    return linhas
+
+
+def busca_comandos(origem, espera):
+    """GET pendurado: devolve na hora se ja tem comando, senao espera ate
+    'espera' segundos acordando quando alguem enfileirar."""
+    origem = str(origem or "").strip()[:40]
+    if not origem:
+        raise ValueError("falta origem")
+    fim = time.time() + max(0, min(ESPERA_MAX, espera))
+    while True:
+        with conexao() as c:
+            c.execute("INSERT INTO maquinas (nome,ultimo_pedido) VALUES (?,?)"
+                      " ON CONFLICT(nome) DO UPDATE SET ultimo_pedido=excluded.ultimo_pedido",
+                      (origem, int(time.time())))
+            p = _pendentes(c, origem)
+            if p:
+                c.execute("UPDATE comandos SET entregue_em=? WHERE id IN (%s) AND entregue_em IS NULL"
+                          % ",".join("?" * len(p)), [int(time.time())] + [x["id"] for x in p])
+        falta = fim - time.time()
+        if p or falta <= 0:
+            return p
+        with _chegou_comando:
+            _chegou_comando.wait(timeout=min(falta, 5))
+
+
+def registra_resultados(origem, resultados):
+    origem = str(origem or "").strip()[:40]
+    n = 0
+    with conexao() as c:
+        for r in (resultados or [])[:100]:
+            if not isinstance(r, dict) or _inteiro(r.get("id")) is None:
+                continue
+            n += c.execute(
+                "UPDATE comandos SET feito_em=?, ok=?, resultado=? WHERE id=? AND origem=?",
+                (int(time.time()), 1 if r.get("ok") else 0,
+                 str(r.get("texto") or r.get("erro") or "")[:300], int(r["id"]), origem)).rowcount
+    return n
+
+
+def maquinas():
+    agora = int(time.time())
+    with conexao() as c:
+        lista = []
+        for m in c.execute("SELECT * FROM maquinas ORDER BY nome"):
+            m = dict(m)
+            try:
+                m["estado"] = json.loads(m.get("estado") or "{}")
+            except ValueError:
+                m["estado"] = {}
+            # perguntou por comando no ultimo minuto = esta ouvindo agora
+            m["ouvindo"] = bool(m.get("ultimo_pedido") and agora - m["ultimo_pedido"] < 75)
+            m["comandos"] = [dict(r) for r in c.execute(
+                "SELECT id,acao,dados,criado_em,entregue_em,feito_em,ok,resultado FROM comandos"
+                " WHERE origem=? ORDER BY id DESC LIMIT 8", (m["nome"],))]
+            lista.append(m)
+    return lista
+
+
+def executa_comando(cmd):
+    """O lado da maquina. So o que esta na lista, cada um com o mesmo codigo
+    que o painel daqui usaria."""
+    acao, d = cmd.get("acao"), cmd.get("dados") or {}
+    if not isinstance(d, dict):
+        d = {}
+    try:
+        if acao == "ponto":
+            qual = d.get("acao") or "alterna"
+            if qual not in ("entra", "sai", "alterna", "troca"):
+                return {"ok": False, "erro": "acao de ponto invalida"}
+            # a hora e a do clique no central: comando que esperou a maquina
+            # ligar nao comeca o turno no momento em que ela ligou
+            r = bate_ponto(qual, d.get("tema"), cmd.get("criado_em"))
+            return {"ok": bool(r.get("ok")), "texto": texto_ponto(r, semana())}
+        if acao == "lanca_turno":
+            tid = cria_turno(d)
+            return {"ok": bool(tid), "texto": "turno lan\u00e7ado" if tid else "precisa de inicio"}
+        if acao == "muda_turno":
+            campos = {k: d[k] for k in ("inicio", "fim", "tema", "obs") if k in d}
+            t = muda_turno(_inteiro(d.get("id")) or 0, campos)
+            return {"ok": bool(t), "texto": "turno consertado" if t else "turno n\u00e3o encontrado"}
+        if acao == "apaga_turno":
+            ok = apaga_turno(_inteiro(d.get("id")) or 0)
+            return {"ok": ok, "texto": "turno apagado" if ok else "turno n\u00e3o encontrado"}
+        if acao == "temas":
+            return {"ok": True, "texto": "temas: " + ", ".join(muda_temas(d.get("temas")))}
+        if acao == "temas_fora":
+            return {"ok": True, "texto": "n\u00e3o contam: " + (", ".join(muda_temas_fora(d.get("temas"))) or "nenhum")}
+        if acao == "meta":
+            return {"ok": True, "texto": "meta %s por semana" % hm_txt(muda_meta(d.get("horas")))}
+    except (TypeError, ValueError) as e:
+        return {"ok": False, "erro": "dados invalidos: %s" % e}
+    return {"ok": False, "erro": "comando desconhecido"}
+
+
+def atende_comandos(lista):
+    """Executa cada comando uma vez so, mesmo que o central mande de novo
+    (a resposta anterior pode ter se perdido no caminho)."""
+    respostas = []
+    for cmd in lista:
+        cid = _inteiro(cmd.get("id"))
+        if cid is None:
+            continue
+        with conexao() as c:
+            ja = c.execute("SELECT resposta FROM comandos_feitos WHERE id_central=?", (cid,)).fetchone()
+        if ja:
+            r = json.loads(ja["resposta"])
+        else:
+            r = executa_comando(cmd)
+            with conexao() as c:
+                c.execute("INSERT OR REPLACE INTO comandos_feitos (id_central,resposta,quando)"
+                          " VALUES (?,?,?)", (cid, json.dumps(r, ensure_ascii=False), int(time.time())))
+                c.execute("DELETE FROM comandos_feitos WHERE quando<?",
+                          (int(time.time()) - 30 * 86400,))
+            print("comando do central: %s -> %s" % (cmd.get("acao"), r.get("texto") or r.get("erro")),
+                  flush=True)
+        r["id"] = cid
+        respostas.append(r)
+    return respostas
+
+
+def laco_comandos():
+    falhas = 0
+    while True:
+        try:
+            r = pede_central("GET", "/api/comandos?origem=%s&espera=%d" % (quote(NOME), ESPERA_MAX),
+                             timeout=ESPERA_MAX + 15)
+            COMANDOS_ESTADO.update(conectado=True, erro=None)
+            lista = r.get("comandos") or []
+            if lista:
+                respostas = atende_comandos(lista)
+                pede_central("POST", "/api/comandos/resultado",
+                             {"origem": NOME, "resultados": respostas})
+                COMANDOS_ESTADO["ultimo"] = int(time.time())
+                _acorda_envio.set()   # o central ve o efeito no proximo envio, ja
+            falhas = 0
+        except urllib.error.HTTPError as e:
+            falhas += 1
+            COMANDOS_ESTADO.update(conectado=False, erro="o central respondeu %d" % e.code)
+        except Exception as e:
+            falhas += 1
+            COMANDOS_ESTADO.update(conectado=False, erro=str(getattr(e, "reason", None) or e)[:160])
+        if falhas:
+            time.sleep(min(60, 5 * falhas))
 
 
 # ------------------------------------------------------------------ a conta da semana
@@ -822,7 +1059,8 @@ class Ponto(BaseHTTPRequestHandler):
         if u.path == "/api/semana":
             s = semana()
             s["com_senha"] = bool(SENHA)   # o painel so mostra "Sair" se houver
-            s["envio"] = ENVIO if DESTINO else None
+            s["envio"] = (dict(ENVIO, comandos=ACEITA_COMANDOS, ouvindo=COMANDOS_ESTADO["conectado"])
+                          if DESTINO else None)
             return self._json(200, s)
         if u.path == "/api/historico":
             n = max(1, min(104, _inteiro((q.get("n") or [""])[0]) or 12))
@@ -830,6 +1068,17 @@ class Ponto(BaseHTTPRequestHandler):
         if u.path == "/api/turnos":
             ini = _inteiro((q.get("semana") or [""])[0]) or int(time.time())
             return self._json(200, turnos_da_semana(ini))
+        if u.path == "/api/maquinas":
+            return self._json(200, {"maquinas": maquinas()})
+        if u.path == "/api/comandos":
+            if not SENHA:
+                return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
+            try:
+                espera = _inteiro((q.get("espera") or [""])[0]) or 0
+                return self._json(200, {"comandos": busca_comandos(
+                    (q.get("origem") or [""])[0], espera)})
+            except ValueError as e:
+                return self._json(400, {"erro": str(e)})
         if u.path == "/api/exportar.csv":
             nome = "ponto-%s.csv" % datetime.date.today().isoformat()
             return self._envia(200, exporta_csv(), "text/csv; charset=utf-8",
@@ -864,6 +1113,19 @@ class Ponto(BaseHTTPRequestHandler):
                 return self._json(200, receber(d))
             except ValueError as e:
                 return self._json(400, {"erro": str(e)})
+        if u.path == "/api/comandos":
+            if not SENHA:
+                return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
+            try:
+                cid = enfileira_comando(d.get("origem"), d.get("acao"), d.get("dados"))
+            except ValueError as e:
+                return self._json(400, {"erro": str(e)})
+            return self._json(201, {"ok": True, "id": cid})
+        if u.path == "/api/comandos/resultado":
+            if not SENHA:
+                return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
+            return self._json(200, {"ok": True, "marcados": registra_resultados(
+                d.get("origem"), d.get("resultados"))})
         if u.path == "/api/turnos":
             tid = cria_turno(d)
             if not tid:
@@ -953,6 +1215,12 @@ def main():
                   flush=True)
         print("Enviando pra %s a cada %ds como '%s'" % (DESTINO, ENVIAR_A_CADA, NOME), flush=True)
         threading.Thread(target=laco_envio, daemon=True).start()
+        if ACEITA_COMANDOS:
+            print("Aceitando comandos de %s (so acoes do Ponto)" % DESTINO, flush=True)
+            threading.Thread(target=laco_comandos, daemon=True).start()
+    elif ACEITA_COMANDOS:
+        print("AVISO: PONTO_ACEITAR_COMANDOS sem PONTO_ENVIAR_PARA - nao ha de quem receber.",
+              flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

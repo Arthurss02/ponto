@@ -90,7 +90,34 @@ python3 servidor/ponto.py
   nome do computador) e só pode ser consertado na máquina de origem.
 - O topo do painel mostra se o último envio deu certo.
 - Desligado por padrão: quem clonar o repositório não manda nada pra lugar
-  nenhum sem configurar.
+  nenhum sem configurar. O endereço do central é você que escolhe.
+
+### Controlar as máquinas pelo central
+
+Com `PONTO_ACEITAR_COMANDOS=1` no `ponto.env` de uma máquina, o painel do
+central ganha um cartão dela em **Outras máquinas**, com o que está rodando lá e
+botões pra começar, trocar e parar. O comando chega em 1–2 segundos.
+
+- A máquina é que pergunta ao central (uma conexão que fica esperando até 25 s
+  e volta assim que tem comando). Por isso funciona atrás de roteador, 4G ou
+  rede de empresa, sem abrir porta nenhuma.
+- Máquina desligada: o comando fica na fila e roda quando ela voltar (até 7
+  dias). Bater ponto usa a hora do clique no central, não a hora em que ela ligou.
+- Cada comando roda uma vez só, mesmo se a resposta se perder no caminho.
+- **Só ações do Ponto**: bater ponto, lançar/consertar/apagar turno, temas,
+  "não conta" e meta. Não existe comando de sistema — se alguém invadisse o
+  central, não ganharia o computador de ninguém.
+
+Pela API (pra script ou atalho), com a senha do central:
+
+```
+POST /api/comandos
+{"origem": "notebook", "acao": "ponto", "dados": {"acao": "entra", "tema": "Estudo"}}
+```
+
+`acao` pode ser `ponto` (`dados.acao`: entra, sai, alterna, troca),
+`lanca_turno`, `muda_turno` (`dados.id` = id do turno na máquina), `apaga_turno`,
+`temas`, `temas_fora` ou `meta`.
 
 ## Pôr o app na tela de início do celular
 
@@ -133,6 +160,7 @@ Tudo por variável de ambiente:
 | `PONTO_ENVIAR_SENHA` | vazio | a `PONTO_SENHA` do central |
 | `PONTO_ENVIAR_A_CADA` | `300` | segundos entre envios (mínimo 30) |
 | `PONTO_NOME` | nome do PC | como esta máquina aparece no central |
+| `PONTO_ACEITAR_COMANDOS` | vazio | `1` deixa o central controlar esta máquina |
 
 Tudo isso também pode ficar num arquivo `ponto.env` na pasta do projeto
 (veja `ponto.env.exemplo`).
@@ -179,7 +207,11 @@ CSV (link **Exportar CSV**).
 | `POST /api/meta` | `{"horas": 40}` |
 | `GET /api/historico?n=12` | horas das últimas n semanas |
 | `GET /api/exportar.csv` | tudo em CSV |
-| `POST /api/receber` | (central) `{"origem", "desde", "turnos": [...]}` — troca os turnos daquela máquina a partir de `desde` |
+| `POST /api/receber` | (central) `{"origem", "desde", "turnos": [...], "estado"}` — troca os turnos daquela máquina a partir de `desde` |
+| `GET /api/maquinas` | (central) máquinas, o que está rodando em cada uma e os últimos comandos |
+| `POST /api/comandos` | (central) põe um comando na fila de uma máquina |
+| `GET /api/comandos?origem=X&espera=25` | (máquina) busca comandos, esperando até 25 s |
+| `POST /api/comandos/resultado` | (máquina) devolve o resultado |
 
 ## Desenvolvimento
 
