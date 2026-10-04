@@ -446,7 +446,7 @@ def sobe_threads():
     print("Enviando pra %s a cada %ds como '%s'" % (DESTINO, ENVIAR_A_CADA, NOME), flush=True)
     threading.Thread(target=laco_envio, daemon=True).start()
     if ACEITA_COMANDOS:
-        print("Aceitando comandos de %s (so acoes do Ponto)" % DESTINO, flush=True)
+        print("Ouvindo comandos de %s (execucao desligada: so confirma)" % DESTINO, flush=True)
         threading.Thread(target=laco_comandos, daemon=True).start()
 
 
