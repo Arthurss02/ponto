@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Ponto</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ponto">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="app.webmanifest">
+<link rel="apple-touch-icon" href="icone-180.png">
+<link rel="icon" href="icone-192.png">
+<style>
+  /* O app do ponto. Uma tela so, feita pra ser aberta pelo icone da tela de
+     inicio, apertada uma vez e fechada. Tudo que nao e "bater" ou "ver como
+     estou" (consertar turno, temas, meta, historico) fica no painel do PC. */
+  :root{
+    --bg:#f5f5f1; --card:#fff; --card2:#fafaf7; --line:#e7e6e0; --line2:#d9d8d0;
+    --txt:#1c1d21; --dim:#6b6b64; --dim2:#a3a39b; --ghost:#ecebe5;
+    --ok:#0e7a3f; --warn:#b45309; --bad:#c0352e; --acc:#2257d6; --acc2:#0e7490;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);color:var(--txt);min-height:100vh;min-height:100dvh;
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;
+    padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 16px);
+    display:flex;flex-direction:column;gap:14px;
+  }
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+
+  .topo{display:flex;align-items:center;justify-content:space-between}
+  .topo h1{font-size:15px;font-weight:700;letter-spacing:.2px}
+  .topo h1 .pc{color:var(--dim);font-weight:500;font-size:12.5px;text-decoration:none;margin-left:6px}
+  .con{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);
+    padding:4px 10px;border-radius:99px;background:var(--card);border:1px solid var(--line)}
+  .con i{width:7px;height:7px;border-radius:50%;background:var(--dim2)}
+  .con.on i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .con.off{color:#7a5406;border-color:#efdcaa;background:#fdf6e2}
+  .con.off i{background:var(--warn)}
+
+  /* ---- o estado: o que esta correndo agora ---- */
+  .estado{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);
+    border-radius:20px;padding:20px 18px 18px;text-align:center}
+  .estado .tema{display:inline-flex;align-items:center;gap:8px;font-size:15px;font-weight:650}
+  .estado .tema i{width:10px;height:10px;border-radius:3px}
+  .estado .tema em{font-style:normal;font-size:11px;color:var(--dim);font-weight:500;
+    border:1px dashed var(--line2);border-radius:99px;padding:1px 7px}
+  .relogio{font-size:62px;font-weight:700;letter-spacing:-1.5px;line-height:1.05;
+    font-variant-numeric:tabular-nums;margin:8px 0 4px}
+  .estado.parado .relogio{font-size:40px;color:var(--dim);letter-spacing:-.5px;margin:10px 0 6px}
+  .estado .sub{font-size:13px;color:var(--dim)}
+
+  /* ---- hoje e semana ---- */
+  .met{display:grid;gap:10px}
+  .linha{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+  .linha .l1{display:flex;align-items:baseline;gap:7px;font-size:13px;color:var(--dim)}
+  .linha .l1 b{font-size:19px;color:var(--txt);font-weight:700;font-variant-numeric:tabular-nums}
+  .linha .l1 .p{margin-left:auto;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums}
+  .linha .l1 .p.bate{color:var(--ok)}
+  .barra{height:7px;border-radius:99px;background:var(--ghost);overflow:hidden;margin-top:9px;display:flex}
+  .barra i{display:block;height:100%;transition:width .6s}
+  .barra i:first-child{border-radius:99px 0 0 99px}
+  .barra i:last-child{border-radius:0 99px 99px 0}
+  .barra.um i{background:linear-gradient(90deg,var(--acc),var(--acc2))}
+  .barra.um i.bate{background:linear-gradient(90deg,var(--ok),var(--acc2))}
+  .descansa{margin-top:8px;font-size:13px;color:var(--ok);font-weight:600}
+
+  /* ---- os botoes ---- */
+  .acoes{display:flex;flex-direction:column;gap:10px;margin-top:auto}
+  .rot{font-size:11.5px;color:var(--dim);letter-spacing:.3px;text-transform:uppercase;margin:4px 2px 0}
+  .grade{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .bt{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+    gap:3px;min-height:74px;padding:12px 14px;border-radius:16px;text-align:left;
+    border:1.5px solid var(--c);background:color-mix(in srgb,var(--c) 14%,var(--card));
+    transition:transform .08s}
+  .bt:active{transform:scale(.97)}
+  .bt b{font-size:16px;font-weight:700;line-height:1.15}
+  .bt span{font-size:11.5px;color:var(--dim)}
+  .bt.fora{border-style:dashed;background:var(--card)}
+  .grade.troca .bt{min-height:58px}
+  .grade.troca .bt b{font-size:14.5px}
+  .parar{width:100%;min-height:78px;border-radius:18px;font-size:20px;font-weight:750;
+    color:#fff;background:linear-gradient(180deg,#e2525d,#c23a45);
+    box-shadow:0 8px 24px -10px rgba(244,98,109,.6);transition:transform .08s}
+  .parar:active{transform:scale(.98)}
+  .parar small{display:block;font-size:12px;font-weight:500;opacity:.8;margin-top:2px}
+
+  .fila{font-size:12px;color:var(--warn);text-align:center}
+  /* o aviso desce de cima: embaixo ficam os botoes, onde o dedo esta */
+  .aviso{position:fixed;left:16px;right:16px;top:calc(env(safe-area-inset-top) + 48px);
+    background:#fff;border:1px solid var(--line2);border-radius:14px;padding:12px 14px;
+    font-size:13.5px;box-shadow:0 12px 30px -8px rgba(28,29,33,.28);
+    transform:translateY(calc(-100% - 80px));opacity:0;pointer-events:none;
+    transition:transform .25s,opacity .25s;z-index:5}
+  .aviso.ve{transform:none;opacity:1}
+  .vazio{color:var(--dim);font-size:13px;text-align:center;padding:30px 0}
+</style>
+</head>
+<body>
+  <div class="topo">
+    <h1>Ponto <a class="pc" href="./" title="Abrir o painel">painel</a></h1>
+    <div class="con" id="con"><i></i><span>conectando</span></div>
+  </div>
+
+  <div class="estado parado" id="estado"><div class="vazio">carregando…</div></div>
+  <div class="met" id="met"></div>
+  <div class="acoes" id="acoes"></div>
+  <div class="fila" id="fila"></div>
+  <div class="aviso" id="aviso"></div>
+
+<script>
+/* ============================================================
+   O app do ponto.
+
+   Regra que manda em tudo aqui: o toque NUNCA se perde. Sem sinal (metro,
+   estrada, Tailscale desligado) a batida vai pra uma fila no aparelho com a
+   hora em que ele tocou, e sobe sozinha quando a conexao volta. O servidor
+   aceita batida atrasada (hora_da_batida no dash-fab) e sabe nao fechar um
+   turno que foi aberto depois dela.
+
+   A tela e montada a partir do ultimo estado do servidor MAIS a fila por
+   cima - entao o relogio comeca a correr no instante do toque, com ou sem
+   rede.
+   ============================================================ */
+/* mesma ordem e mesmos tons do painel: o tema tem a mesma cor nas duas telas */
+var CORES=["#2563eb","#7c3aed","#0891b2","#059669","#d97706","#db2777"];
+var CHAVE_FILA="ponto_fila_v1", CHAVE_ULTIMA="ponto_ultima_v1";
+var S=null, ONLINE=null, ENVIANDO=false;
+
+function le(chave, padrao){
+  try{ var v=localStorage.getItem(chave); return v ? JSON.parse(v) : padrao; }catch(e){ return padrao; }
+}
+function grava(chave, v){ try{ localStorage.setItem(chave, JSON.stringify(v)); }catch(e){} }
+var FILA=le(CHAVE_FILA, []);
+S=le(CHAVE_ULTIMA, null);
+
+function agora(){ return Math.floor(Date.now()/1000); }
+function esc(t){
+  return String(t==null?"":t).replace(/[<>&"]/g,function(c){
+    return {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c];});
+}
+function cor(nome){
+  var i=((S&&S.temas)||[]).indexOf(nome);
+  return i<0 ? "#85857d" : CORES[i%CORES.length];
+}
+function conta(nome){ return ((S&&S.temas_fora)||[]).indexOf(nome)<0; }
+function hm(h){
+  var m=Math.max(0,Math.round((h||0)*60));
+  return m>=60 ? Math.floor(m/60)+"h"+String(m%60).padStart(2,"0") : m+"min";
+}
+function relogio(seg){
+  seg=Math.max(0,Math.floor(seg));
+  var h=Math.floor(seg/3600), m=Math.floor(seg%3600/60), s=seg%60;
+  /* sempre H:MM:SS: "22:30" sozinho parece hora do dia, e embaixo esta
+     escrito "desde 13:16" */
+  return h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
+function hhmm(ts){
+  var d=new Date(ts*1000);
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+}
+function ehHoje(ts){ return new Date(ts*1000).toDateString()===new Date().toDateString(); }
+
+/* O estado da tela = servidor + fila aplicada por cima, na ordem dos toques.
+   Mesmas regras do bate_ponto do servidor, pra tela nao mentir: entra com
+   turno aberto nao faz nada; sai/troca anterior ao turno aberto nao vale. */
+function estado(){
+  var e={rodando:false, desde:null, tema:"", extra:0, extraHoje:0};
+  if(S){ e.rodando=!!S.rodando; e.desde=S.desde; e.tema=S.tema_atual||""; }
+  function fecha(q){
+    if(conta(e.tema)){
+      var h=Math.max(0,q-e.desde)/3600;
+      e.extra+=h;
+      if(ehHoje(e.desde)) e.extraHoje+=h;   /* turno conta no dia em que comecou */
+    }
+    e.rodando=false; e.desde=null;
+  }
+  FILA.forEach(function(b){
+    if(b.acao==="entra"){
+      if(!e.rodando){ e.rodando=true; e.desde=b.quando; e.tema=b.tema; }
+    }else if(b.acao==="sai"){
+      if(e.rodando && b.quando>=e.desde) fecha(b.quando);
+    }else if(b.acao==="troca"){
+      if(e.rodando){
+        if(b.quando<e.desde || e.tema===b.tema) return;
+        fecha(b.quando);
+      }
+      e.rodando=true; e.desde=b.quando; e.tema=b.tema;
+    }
+  });
+  return e;
+}
+
+/* ---------- desenho ---------- */
+function pinta(){
+  var con=document.getElementById("con");
+  con.className="con "+(ONLINE===true?"on":ONLINE===false?"off":"");
+  con.querySelector("span").textContent =
+    ONLINE===true ? "ao vivo" : ONLINE===false ? "sem conexão" : "conectando";
+  document.getElementById("fila").textContent = FILA.length
+    ? FILA.length+(FILA.length>1?" batidas guardadas":" batida guardada")+
+      " no celular · sobem quando a conexão voltar"
+    : "";
+
+  if(!S){
+    document.getElementById("estado").innerHTML =
+      '<div class="vazio">'+(ONLINE===false
+        ? 'Sem conexão com o servidor.<br>Está na mesma rede (ou na VPN) que ele?'
+        : 'carregando…')+'</div>';
+    return;
+  }
+  var e=estado(), t=agora();
+  var vivo = e.rodando && conta(e.tema) ? Math.max(0,t-e.desde)/3600 : 0;
+  var vivoHoje = e.rodando && conta(e.tema) && ehHoje(e.desde) ? vivo : 0;
+  var semana = (S.horas_fechadas||0) + e.extra + vivo;
+  var hoje = (S.hoje_fechadas!=null ? S.hoje_fechadas : 0) + e.extraHoje + vivoHoje;
+
+  /* estado */
+  var est=document.getElementById("estado");
+  est.className="estado"+(e.rodando?"":" parado");
+  est.innerHTML = e.rodando
+    ? '<div class="tema"><i style="background:'+cor(e.tema)+'"></i>'+esc(e.tema)+
+        (conta(e.tema)?'':' <em>não conta</em>')+'</div>'+
+      '<div class="relogio" id="rel">'+relogio(t-e.desde)+'</div>'+
+      '<div class="sub">desde '+hhmm(e.desde)+'</div>'
+    : '<div class="tema" style="color:var(--dim)">Parado</div>'+
+      '<div class="relogio">'+hm(hoje)+'</div>'+
+      '<div class="sub">feitos hoje · toque num tema pra começar</div>';
+
+  /* hoje e semana */
+  var meta=S.meta||70, alvo=S.meta_hoje||0, h="";
+  if(S.meta_hoje_ok!==false && alvo>0.05){
+    var pct=Math.round(100*hoje/alvo), bate=pct>=100;
+    h+='<div class="linha"><div class="l1">Hoje <b>'+hm(hoje)+'</b> de '+hm(alvo)+
+       '<span class="p'+(bate?" bate":"")+'">'+pct+'%</span></div>'+
+       '<div class="barra um"><i class="'+(bate?"bate":"")+'" style="width:'+Math.min(100,pct)+'%"></i></div>'+
+       (bate ? '<div class="descansa">'+(hoje-alvo>=0.5
+                 ? 'Passou '+hm(hoje-alvo)+' da meta de hoje — descansa.'
+                 : 'Meta de hoje batida — pode descansar.')+'</div>' : '')+
+       '</div>';
+  }else if(alvo<=0.05 && semana>=meta){
+    h+='<div class="linha"><div class="l1">Hoje <b>'+hm(hoje)+'</b></div>'+
+       '<div class="descansa">Semana fechada — descansa.</div></div>';
+  }else{
+    h+='<div class="linha"><div class="l1">Hoje <b>'+hm(hoje)+'</b></div></div>';
+  }
+  /* a semana fatiada por tema, igual a parede: o que conta enche a barra */
+  var pt=(S.por_tema||[]).filter(function(x){ return x.conta!==false; });
+  var segs = pt.length
+    ? pt.map(function(x){
+        var hh=x.horas;
+        /* o turno que esta correndo so esta no servidor ate o ultimo fetch */
+        return '<i style="width:'+Math.max(0,100*hh/meta).toFixed(2)+'%;background:'+cor(x.tema)+'"></i>';
+      }).join("")
+    : '<i style="width:'+Math.min(100,100*semana/meta).toFixed(1)+'%;background:var(--acc)"></i>';
+  h+='<div class="linha"><div class="l1">Semana <b>'+hm(semana)+'</b> de '+Math.round(meta)+'h'+
+     '<span class="p">'+Math.round(100*semana/meta)+'%</span></div>'+
+     '<div class="barra">'+segs+'</div></div>';
+  document.getElementById("met").innerHTML=h;
+
+  /* botoes */
+  var temas=S.temas||[];
+  function botao(nome, acao, extra){
+    return '<button class="bt'+(conta(nome)?'':' fora')+'" style="--c:'+cor(nome)+'" '+
+      'data-acao="'+acao+'" data-tema="'+esc(nome)+'"><b>'+esc(nome)+'</b>'+
+      '<span>'+(extra || (conta(nome)?'':'não conta na meta'))+'</span></button>';
+  }
+  var a="";
+  if(e.rodando){
+    a+='<button class="parar" data-acao="sai">Parar<small>'+esc(e.tema)+' · '+
+       relogio(t-e.desde)+'</small></button>';
+    var outros=temas.filter(function(x){ return x!==e.tema; });
+    if(outros.length){
+      a+='<div class="rot">Trocar para</div><div class="grade troca">'+
+         outros.map(function(x){ return botao(x,"troca"); }).join("")+'</div>';
+    }
+  }else{
+    a+='<div class="rot">Começar</div><div class="grade">'+
+       temas.map(function(x){ return botao(x,"entra"); }).join("")+'</div>';
+  }
+  var ac=document.getElementById("acoes");
+  if(ac.dataset.chave!==a.replace(/\d+:\d\d(:\d\d)?/g,"")){
+    ac.innerHTML=a; ac.dataset.chave=a.replace(/\d+:\d\d(:\d\d)?/g,"");
+  }else{
+    var sm=ac.querySelector(".parar small");
+    if(sm) sm.textContent=e.tema+" · "+relogio(t-e.desde);
+  }
+}
+
+/* so o relogio anda a cada segundo; o resto so muda com toque ou fetch */
+setInterval(function(){
+  if(!S) return;
+  var e=estado();
+  var rel=document.getElementById("rel");
+  if(rel && e.rodando) rel.textContent=relogio(agora()-e.desde);
+  var sm=document.querySelector(".parar small");
+  if(sm && e.rodando) sm.textContent=e.tema+" · "+relogio(agora()-e.desde);
+}, 1000);
+setInterval(function(){ if(S) pinta(); }, 30000);
+
+/* ---------- rede ---------- */
+function aviso(txt){
+  var el=document.getElementById("aviso");
+  el.textContent=txt; el.classList.add("ve");
+  clearTimeout(aviso.t); aviso.t=setTimeout(function(){ el.classList.remove("ve"); }, 3200);
+}
+
+async function pede(metodo, url, corpo){
+  var ctl=new AbortController(), t=setTimeout(function(){ ctl.abort(); }, 8000);
+  try{
+    var r=await fetch(url,{method:metodo, cache:"no-store", signal:ctl.signal,
+      headers:corpo?{"Content-Type":"application/json"}:{},
+      body:corpo?JSON.stringify(corpo):undefined});
+    if(r.status===401){ location.href="entrar?volta=app"; throw new Error("senha"); }
+    if(!r.ok) throw new Error("http "+r.status);
+    return await r.json();
+  }finally{ clearTimeout(t); }
+}
+
+async function busca(){
+  try{
+    S=await pede("GET","api/semana");
+    ONLINE=true; grava(CHAVE_ULTIMA, S);
+  }catch(e){ ONLINE=false; }
+  pinta();
+}
+
+/* sobe a fila na ordem. Parou no primeiro erro de rede: a ordem importa
+   (um "sai" antes do seu "entra" seria ignorado) */
+async function esvazia(){
+  if(ENVIANDO || !FILA.length) return;
+  ENVIANDO=true;
+  try{
+    while(FILA.length){
+      var b=FILA[0], r;
+      try{ r=await pede("POST","api/ponto",b); }
+      catch(e){ ONLINE=false; break; }
+      ONLINE=true;
+      FILA.shift(); grava(CHAVE_FILA, FILA);
+      if(r && r.semana){ S=r.semana; grava(CHAVE_ULTIMA, S); }
+      if(r && r.texto && b.mostrar) aviso(r.texto);
+    }
+  }finally{
+    ENVIANDO=false; pinta();
+  }
+}
+
+document.getElementById("acoes").addEventListener("click", function(ev){
+  var b=ev.target.closest("button[data-acao]"); if(!b) return;
+  var bat={acao:b.dataset.acao, tema:b.dataset.tema||null, quando:agora(), mostrar:true};
+  FILA.push(bat); grava(CHAVE_FILA, FILA);
+  pinta();                 /* o relogio ja comeca aqui, antes da rede */
+  if(ONLINE===false) aviso("Guardado no celular — sobe quando a conexão voltar.");
+  esvazia();
+});
+
+window.addEventListener("online", function(){ esvazia().then(busca); });
+document.addEventListener("visibilitychange", function(){
+  if(!document.hidden){ esvazia().then(busca); }
+});
+setInterval(function(){ if(!document.hidden){ esvazia().then(busca); } }, 20000);
+
+pinta();
+esvazia().then(busca);
+
+/* offline de verdade (abrir o app sem rede) precisa de service worker, e o
+   navegador so deixa registrar em HTTPS. Por IP (http) isto nao roda e tudo
+   bem - o app funciona online e a fila cobre as quedas. No dia em que o
+   endereco virar https, liga sozinho. */
+if("serviceWorker" in navigator && window.isSecureContext){
+  navigator.serviceWorker.register("app-sw.js",{scope:"./app"}).catch(function(){});
+}
+</script>
+</body>
+</html>

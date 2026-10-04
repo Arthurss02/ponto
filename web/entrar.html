@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Entrar · Ponto</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="app.webmanifest">
+<link rel="apple-touch-icon" href="icone-180.png">
+<link rel="icon" href="icone-192.png">
+<style>
+  :root{--bg:#f5f5f1;--card:#fff;--line:#e7e6e0;--txt:#1c1d21;--dim:#6b6b64;--bad:#c0352e;--acc:#2257d6;color-scheme:light}
+  *{box-sizing:border-box;margin:0}
+  body{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px;
+    background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif}
+  form{width:100%;max-width:340px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:26px 22px;display:grid;gap:14px}
+  img{width:56px;height:56px;border-radius:14px}
+  h1{font-size:20px}
+  p{font-size:14px;color:var(--dim);line-height:1.45}
+  input{font:inherit;font-size:17px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;width:100%}
+  input:focus{outline:2px solid var(--acc);outline-offset:1px}
+  button{font:inherit;font-size:16px;font-weight:700;padding:13px;border:0;border-radius:12px;background:var(--acc);color:#fff;cursor:pointer}
+  .erro{color:var(--bad);font-size:14px;font-weight:600}
+</style>
+</head>
+<body>
+<form method="post" action="entrar">
+  <img src="icone-192.png" alt="">
+  <h1>Ponto</h1>
+  <p>Digite a senha deste servidor. O aparelho fica lembrado.</p>
+  <div class="erro" id="erro" hidden>Senha errada. Tente de novo.</div>
+  <input type="password" name="senha" autocomplete="current-password" placeholder="Senha" required autofocus>
+  <input type="hidden" name="volta" id="volta">
+  <button type="submit">Entrar</button>
+</form>
+<script>
+  var q=new URLSearchParams(location.search);
+  if(q.get("erro")) document.getElementById("erro").hidden=false;
+  document.getElementById("volta").value=q.get("volta")==="app"?"app":"";
+</script>
+</body>
+</html>

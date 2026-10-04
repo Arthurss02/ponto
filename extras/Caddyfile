@@ -1,0 +1,6 @@
+# HTTPS automatico na VPS (Let's Encrypt). Aponte o dominio pro IP da VPS,
+# troque o nome abaixo e rode o Caddy. Com HTTPS o app do celular abre ate
+# sem internet e pode ser instalado na tela de inicio como app.
+ponto.seudominio.com.br {
+	reverse_proxy 127.0.0.1:8095
+}

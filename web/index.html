@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ponto</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="icone-192.png">
+<link rel="apple-touch-icon" href="icone-180.png">
+<style>
+  /* O painel: o mesmo Ponto do celular visto de cima. Aqui se ve a semana
+     inteira, conserta turno esquecido, lanca o dia que nao foi batido e
+     muda temas e meta. Mesmas cores do app, na mesma ordem. */
+  :root{
+    --bg:#f5f5f1; --card:#fff; --card2:#fafaf7; --line:#e7e6e0; --line2:#d9d8d0;
+    --txt:#1c1d21; --dim:#6b6b64; --dim2:#a3a39b; --ghost:#ecebe5;
+    --ok:#0e7a3f; --warn:#b45309; --warn-bg:#fdf6e2; --bad:#c0352e; --acc:#2257d6;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter",system-ui,sans-serif;
+    font-size:14px;line-height:1.4;-webkit-font-smoothing:antialiased}
+  button,input,select{font:inherit;color:inherit}
+  button{cursor:pointer;border:0;background:none}
+  :focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+  .num{font-variant-numeric:tabular-nums}
+
+  .pagina{max-width:1120px;margin:0 auto;padding:22px 24px 60px;display:grid;gap:18px}
+
+  /* ---- topo: o que esta rodando agora, sempre a vista ---- */
+  .topo{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .topo h1{font-size:18px;font-weight:750;display:flex;align-items:center;gap:9px}
+  .topo h1 img{width:28px;height:28px;border-radius:8px}
+  .topo .con{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:6px}
+  .con i{width:7px;height:7px;border-radius:50%;background:var(--dim2)}
+  .con.on i{background:var(--ok)}
+  .con.off{color:var(--warn)} .con.off i{background:var(--warn)}
+  .topo .links{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  .topo .links a{color:var(--dim);text-decoration:none}
+  .topo .links a:hover{color:var(--txt)}
+
+  .agora{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+    background:var(--card);border:1px solid var(--line);border-radius:20px;padding:18px 20px}
+  .agora .qual{display:flex;flex-direction:column;gap:2px;min-width:200px}
+  .agora .tema{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:650}
+  .agora .tema i{width:11px;height:11px;border-radius:3px}
+  .agora .tema em{font-style:normal;font-size:11px;color:var(--dim);border:1px dashed var(--line2);border-radius:99px;padding:1px 7px;font-weight:500}
+  .agora .rel{font-size:44px;font-weight:750;letter-spacing:-1px;line-height:1.05}
+  .agora.parado .rel{color:var(--dim)}
+  .agora .sub{font-size:12.5px;color:var(--dim)}
+  .agora.esquecido{border-color:#efdcaa;background:var(--warn-bg)}
+  .agora.esquecido .sub{color:var(--warn);font-weight:600}
+  .botoes{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .bt{--c:var(--acc);padding:11px 16px;border-radius:12px;font-weight:650;
+    border:1.5px solid var(--c);background:color-mix(in srgb,var(--c) 12%,var(--card))}
+  .bt:hover{background:color-mix(in srgb,var(--c) 20%,var(--card))}
+  .bt.fora{border-style:dashed;background:var(--card)}
+  .bt.parar{border:0;background:var(--bad);color:#fff;padding:12px 22px}
+  .bt.parar:hover{background:#a92b25}
+  .botoes .rot{font-size:12px;color:var(--dim);margin-right:2px}
+
+  /* ---- grade principal ---- */
+  .grade{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px}
+  @media (max-width:860px){.grade{grid-template-columns:1fr}}
+  .bloco{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
+  .bloco h2{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:baseline;gap:10px}
+  .bloco h2 small{font-weight:500;color:var(--dim);font-size:12.5px}
+
+  /* a semana: a barra e o numero sao a peca principal do painel */
+  .total{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .total b{font-size:40px;font-weight:780;letter-spacing:-1px}
+  .total span{color:var(--dim);font-size:15px}
+  .total .pct{margin-left:auto;font-size:22px;font-weight:750}
+  .total .pct.bate{color:var(--ok)}
+  .barra{position:relative;height:16px;border-radius:99px;background:var(--ghost);overflow:hidden;display:flex;margin:12px 0 6px}
+  .barra i{display:block;height:100%}
+  .legenda{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--dim);margin-bottom:14px}
+  .legenda span{display:inline-flex;align-items:center;gap:6px}
+  .legenda i{width:9px;height:9px;border-radius:3px}
+  .legenda b{color:var(--txt);font-weight:650}
+  .fatos{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .fato{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .fato .v{font-size:18px;font-weight:720}
+  .fato .v.bom{color:var(--ok)}
+  .fato .r{font-size:12px;color:var(--dim)}
+
+  /* dias e historico: colunas */
+  .colunas{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;align-items:end;height:170px}
+  .colunas.hist{grid-template-columns:repeat(var(--n,8),1fr);height:auto;min-height:150px;flex:1}
+  .bloco.estica{display:flex;flex-direction:column}
+  .col{display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end}
+  .col .pilha{width:100%;max-width:46px;display:flex;flex-direction:column-reverse;border-radius:8px;overflow:hidden;background:var(--ghost);min-height:3px}
+  .col .pilha i{display:block;width:100%}
+  .col .pilha i.fora{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 3px,transparent 3px 7px)}
+  .col .h{font-size:12px;font-weight:650}
+  .col .d{font-size:11.5px;color:var(--dim)}
+  .col.hoje .d{color:var(--txt);font-weight:700}
+  .col.atual .pilha{background:color-mix(in srgb,var(--acc) 14%,var(--ghost))}
+  .linha-meta{font-size:12px;color:var(--dim);margin-top:10px}
+
+  /* turnos */
+  .nav{margin-left:auto;display:flex;gap:4px;align-items:center}
+  .nav button{padding:4px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card2);font-size:13px}
+  .nav button:disabled{opacity:.4;cursor:default}
+  .tabela{width:100%;border-collapse:collapse}
+  .tabela th{text-align:left;font-size:12px;color:var(--dim);font-weight:600;padding:0 8px 8px}
+  .tabela td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:middle}
+  .tabela input,.tabela select,.lanca input,.lanca select,.ajuste input{
+    border:1px solid var(--line);border-radius:9px;padding:7px 9px;background:var(--card);min-width:0}
+  .tabela input[type=text]{width:100%}
+  .tabela .dur{font-weight:650;white-space:nowrap}
+  .tabela .rodando{color:var(--ok);font-weight:650}
+  .tabela .apaga{color:var(--dim);padding:6px 8px;border-radius:8px}
+  .tabela .apaga:hover{color:var(--bad);background:#fbeceb}
+  .rolagem{overflow-x:auto}
+  .vazio{color:var(--dim);padding:14px 2px}
+  .lanca{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line2)}
+  .lanca label,.ajuste label{display:grid;gap:4px;font-size:12px;color:var(--dim)}
+  .acao{padding:9px 14px;border-radius:10px;background:var(--txt);color:#fff;font-weight:650}
+  .acao.leve{background:var(--card2);color:var(--txt);border:1px solid var(--line)}
+
+  /* ajustes */
+  .ajustes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px}
+  .ajuste{display:grid;gap:10px;align-content:start}
+  .ajuste h3{font-size:13px;font-weight:700}
+  .ajuste p{font-size:12.5px;color:var(--dim)}
+  .tema-linha{display:flex;gap:8px;align-items:center}
+  .tema-linha i{width:12px;height:12px;border-radius:4px;flex:none}
+  .tema-linha input[type=text]{flex:1}
+  .tema-linha label{display:flex;flex-direction:row;align-items:center;gap:5px;white-space:nowrap}
+
+  .aviso{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
+    background:var(--txt);color:#fff;padding:11px 16px;border-radius:12px;font-size:13.5px;transition:.2s}
+  .aviso.ve{transform:translate(-50%,0);opacity:1}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="pagina">
+  <div class="topo">
+    <h1><img src="icone-192.png" alt="">Ponto</h1>
+    <div class="con" id="con"><i></i><span>conectando</span></div>
+    <div class="links">
+      <a href="app">App do celular</a>
+      <a href="api/exportar.csv">Exportar CSV</a>
+      <a href="sair" id="sair" hidden>Sair</a>
+    </div>
+  </div>
+
+  <section class="agora parado" id="agora" aria-live="polite"><div class="vazio">carregando…</div></section>
+
+  <div class="grade">
+    <section class="bloco" id="semana"></section>
+    <section class="bloco estica">
+      <h2>Últimas semanas <small id="hist-sub"></small></h2>
+      <div class="colunas hist" id="hist"></div>
+    </section>
+  </div>
+
+  <section class="bloco">
+    <h2>Dia a dia <small>barra listrada = tema que não conta na meta</small></h2>
+    <div class="colunas" id="dias"></div>
+    <div class="linha-meta" id="dias-sub"></div>
+  </section>
+
+  <section class="bloco">
+    <h2>Turnos <small id="turnos-sub"></small>
+      <span class="nav">
+        <button id="ant" aria-label="Semana anterior">‹</button>
+        <button id="atual">esta semana</button>
+        <button id="prox" aria-label="Próxima semana">›</button>
+      </span>
+    </h2>
+    <div class="rolagem"><table class="tabela" id="turnos"></table></div>
+    <form class="lanca" id="lanca">
+      <label>Início<input type="datetime-local" name="inicio" required></label>
+      <label>Fim<input type="datetime-local" name="fim" required></label>
+      <label>Tema<select name="tema" id="lanca-tema"></select></label>
+      <label style="flex:1;min-width:160px">Anotação<input type="text" name="obs" maxlength="120" placeholder="opcional"></label>
+      <button class="acao" type="submit">Lançar turno</button>
+    </form>
+  </section>
+
+  <section class="bloco">
+    <h2>Ajustes</h2>
+    <div class="ajustes">
+      <div class="ajuste">
+        <h3>Meta da semana</h3>
+        <label>Horas por semana<input type="number" id="meta" min="1" max="168" step="0.5" style="width:120px"></label>
+        <p>A meta de hoje sai daqui: o que falta da semana dividido pelos dias que sobram.</p>
+      </div>
+      <div class="ajuste">
+        <h3>Temas</h3>
+        <div id="temas"></div>
+        <div style="display:flex;gap:8px">
+          <button class="acao leve" id="mais-tema" type="button">Adicionar tema</button>
+          <button class="acao" id="salva-temas" type="button">Salvar temas</button>
+        </div>
+        <p>Até 6. Renomear um tema não muda os turnos antigos. “Não conta” mede o tempo sem somar na meta (transporte, por exemplo).</p>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="aviso" id="aviso"></div>
+<script>
+var CORES=["#2563eb","#7c3aed","#0891b2","#059669","#d97706","#db2777"];
+var DIAS=["seg","ter","qua","qui","sex","sáb","dom"];
+var W=null, ONLINE=null, SEM_TURNOS=null, VISTA=null, TURNOS=[];
+
+function $(id){ return document.getElementById(id); }
+function agora(){ return Math.floor(Date.now()/1000); }
+function esc(t){
+  return String(t==null?"":t).replace(/[<>&"]/g,function(c){
+    return {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c];});
+}
+function cor(nome){
+  var i=((W&&W.temas)||[]).indexOf(nome);
+  return i<0 ? "#85857d" : CORES[i%CORES.length];
+}
+function conta(nome){ return ((W&&W.temas_fora)||[]).indexOf(nome)<0; }
+function hm(h){
+  var m=Math.max(0,Math.round((h||0)*60));
+  return m>=60 ? Math.floor(m/60)+"h"+String(m%60).padStart(2,"0") : m+"min";
+}
+function relogio(seg){
+  seg=Math.max(0,Math.floor(seg));
+  var h=Math.floor(seg/3600), m=Math.floor(seg%3600/60), s=seg%60;
+  return h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
+function dois(n){ return String(n).padStart(2,"0"); }
+function hhmm(ts){ var d=new Date(ts*1000); return dois(d.getHours())+":"+dois(d.getMinutes()); }
+function ddmm(ts){ var d=new Date(ts*1000); return dois(d.getDate())+"/"+dois(d.getMonth()+1); }
+function local(ts){
+  if(!ts) return "";
+  var d=new Date(ts*1000);
+  return d.getFullYear()+"-"+dois(d.getMonth()+1)+"-"+dois(d.getDate())+"T"+dois(d.getHours())+":"+dois(d.getMinutes());
+}
+function deLocal(v){ return v ? Math.floor(new Date(v).getTime()/1000) : null; }
+function ehHoje(ts){ return new Date(ts*1000).toDateString()===new Date().toDateString(); }
+
+function aviso(txt){
+  var el=$("aviso"); el.textContent=txt; el.classList.add("ve");
+  clearTimeout(aviso.t); aviso.t=setTimeout(function(){ el.classList.remove("ve"); }, 3000);
+}
+
+async function api(metodo, url, corpo){
+  var r=await fetch(url,{method:metodo, cache:"no-store",
+    headers:corpo?{"Content-Type":"application/json"}:{},
+    body:corpo?JSON.stringify(corpo):undefined});
+  if(r.status===401){ location.href="entrar"; throw new Error("senha"); }
+  var d=await r.json().catch(function(){ return {}; });
+  if(!r.ok) throw new Error(d.erro||("http "+r.status));
+  return d;
+}
+
+/* o cronometro vivo: o servidor manda so os turnos fechados, a tela soma o
+   que esta correndo em cima - assim o numero anda a cada segundo sem fetch */
+function vivo(){
+  var t=agora(), rod=W.rodando && W.tema_atual_conta;
+  var v = rod ? Math.max(0,t-W.desde)/3600 : 0;
+  return {
+    semana:(W.horas_fechadas||0)+v,
+    hoje:(W.hoje_fechadas||0)+(rod && ehHoje(W.desde) ? v : 0),
+    seg: W.rodando ? t-W.desde : 0
+  };
+}
+
+/* ---------- topo: rodando agora ---------- */
+function pintaAgora(){
+  var el=$("agora"), v=vivo(), temas=W.temas||[];
+  el.className="agora"+(W.rodando?"":" parado")+(W.esquecido?" esquecido":"");
+  var qual = W.rodando
+    ? '<div class="tema"><i style="background:'+cor(W.tema_atual)+'"></i>'+esc(W.tema_atual)+
+        (conta(W.tema_atual)?'':' <em>não conta</em>')+'</div>'+
+      '<div class="rel num" id="rel">'+relogio(v.seg)+'</div>'+
+      '<div class="sub">'+(W.esquecido
+        ? 'Rodando desde '+ddmm(W.desde)+' '+hhmm(W.desde)+' — esqueceu de parar? Conserte o fim lá embaixo.'
+        : 'desde '+hhmm(W.desde))+'</div>'
+    : '<div class="tema" style="color:var(--dim)">Parado</div>'+
+      '<div class="rel num">'+hm(v.hoje)+'</div><div class="sub">feitos hoje</div>';
+  var bts="";
+  if(W.rodando){
+    var outros=temas.filter(function(x){ return x!==W.tema_atual; });
+    if(outros.length) bts+='<span class="rot">Trocar para</span>'+outros.map(function(x){ return botao(x,"troca"); }).join("");
+    bts+='<button class="bt parar" data-acao="sai">Parar</button>';
+  }else{
+    bts+='<span class="rot">Começar</span>'+temas.map(function(x){ return botao(x,"entra"); }).join("");
+  }
+  var chave=String(W.rodando)+W.tema_atual+W.esquecido+temas.join("|")+(W.temas_fora||[]).join("|");
+  if(el.dataset.chave!==chave){
+    el.innerHTML='<div class="qual">'+qual+'</div><div class="botoes">'+bts+'</div>';
+    el.dataset.chave=chave;
+  }else if(!W.rodando){
+    el.querySelector(".rel").textContent=hm(v.hoje);
+  }
+}
+function botao(nome, acao){
+  return '<button class="bt'+(conta(nome)?'':' fora')+'" style="--c:'+cor(nome)+'" data-acao="'+acao+
+    '" data-tema="'+esc(nome)+'">'+esc(nome)+'</button>';
+}
+
+/* ---------- a semana ---------- */
+function pintaSemana(){
+  var v=vivo(), meta=W.meta||40, pct=Math.round(100*v.semana/meta);
+  var pt=(W.por_tema||[]).filter(function(x){ return x.conta; });
+  var segs=pt.map(function(x){
+    var h=x.horas;
+    /* o turno vivo cresce dentro do proprio tema */
+    if(W.rodando && x.tema===W.tema_atual) h += Math.max(0, v.semana-(W.horas||0));
+    return '<i style="width:'+Math.max(0,Math.min(100,100*h/meta)).toFixed(2)+'%;background:'+cor(x.tema)+'"></i>';
+  }).join("");
+  var leg=(W.por_tema||[]).map(function(x){
+    return '<span><i style="background:'+cor(x.tema)+(x.conta?'':';opacity:.55')+'"></i>'+esc(x.tema)+
+      ' <b class="num">'+hm(x.horas)+'</b>'+(x.conta?'':' (não conta)')+'</span>';
+  }).join("");
+  var fatos=[];
+  if(W.meta_hoje_ok && W.meta_hoje>0.05){
+    var ph=Math.round(100*v.hoje/W.meta_hoje);
+    fatos.push([hm(v.hoje)+' de '+hm(W.meta_hoje), ph>=100?'meta de hoje batida — pode descansar':'hoje ('+ph+'%)', ph>=100]);
+  }else{
+    fatos.push([hm(v.hoje), v.semana>=meta?'hoje · semana fechada':'hoje', v.semana>=meta]);
+  }
+  fatos.push([hm(W.projecao_media), 'no ritmo médio, fecha a semana com', W.projecao_media>=meta]);
+  fatos.push([hm(W.projecao_hoje), 'se todo dia for igual a hoje', W.projecao_hoje>=meta]);
+  if((W.passada_total||0)>0){
+    var dif=v.semana-W.passada_ate_agora;
+    fatos.push([(dif>=0?'+':'−')+hm(Math.abs(dif)), 'contra a semana passada até esta hora', dif>=0]);
+  }
+  fatos.push([W.dias_trabalhados+(W.dias_trabalhados===1?' dia':' dias'),
+    W.mediana_dia ? hm(W.mediana_dia)+' num dia típico' : 'com hora lançada', false]);
+  $("semana").innerHTML=
+    '<h2>Esta semana <small>desde segunda '+ddmm(W.inicio_semana)+'</small></h2>'+
+    '<div class="total num"><b>'+hm(v.semana)+'</b><span>de '+hm(meta)+'</span>'+
+      '<span class="pct num'+(pct>=100?' bate':'')+'">'+pct+'%</span></div>'+
+    '<div class="barra" role="img" aria-label="'+pct+'% da meta">'+segs+'</div>'+
+    '<div class="legenda">'+(leg||'<span>nenhum turno ainda</span>')+'</div>'+
+    '<div class="fatos">'+fatos.map(function(f){
+      return '<div class="fato"><div class="v num'+(f[2]?' bom':'')+'">'+f[0]+'</div><div class="r">'+f[1]+'</div></div>';
+    }).join("")+'</div>';
+}
+
+/* ---------- colunas: dias e historico ---------- */
+function pintaDias(){
+  var maior=Math.max(W.meta_hoje||0, 1);
+  W.por_dia_tema.forEach(function(d){
+    var s=d.reduce(function(a,x){ return a+x.horas; },0); if(s>maior) maior=s;
+  });
+  $("dias").innerHTML=W.por_dia_tema.map(function(d,i){
+    var s=d.reduce(function(a,x){ return a+x.horas; },0);
+    var conta_=(W.por_dia||[])[i]||0;
+    var pil=d.map(function(x){
+      return '<i class="'+(x.conta?'':'fora')+'" style="height:'+(100*x.horas/s).toFixed(2)+'%;background-color:'+cor(x.tema)+'" title="'+esc(x.tema)+' '+hm(x.horas)+'"></i>';
+    }).join("");
+    return '<div class="col'+(i===W.dia_atual?' hoje':'')+'">'+
+      '<div class="h num">'+(s>0?hm(conta_):'')+'</div>'+
+      '<div class="pilha" style="height:'+(s>0?Math.max(3,100*s/maior*.82):2)+'%">'+pil+'</div>'+
+      '<div class="d">'+DIAS[i]+'</div></div>';
+  }).join("");
+  $("dias-sub").textContent = W.falta>0
+    ? 'Faltam '+hm(W.falta)+' pra meta — '+hm(W.por_dia_pra_meta)+' por dia contando hoje.'
+    : 'Meta da semana batida.';
+}
+function pintaHist(){
+  var hs=W.historico||[], meta=W.meta||40;
+  var maior=Math.max(meta, Math.max.apply(null, hs.map(function(x){ return x.horas; }).concat([1])));
+  var el=$("hist"); el.style.setProperty("--n", hs.length);
+  el.innerHTML=hs.map(function(x){
+    return '<div class="col'+(x.atual?' atual':'')+'" title="'+x.dias+' dias">'+
+      '<div class="h num">'+(x.horas>0?hm(x.horas):'')+'</div>'+
+      '<div class="pilha" style="height:'+Math.max(2,100*x.horas/maior*.82)+'%"><i style="height:100%;background:'+
+        (x.horas>=meta?'var(--ok)':'var(--acc)')+'"></i></div>'+
+      '<div class="d">'+x.rotulo+'</div></div>';
+  }).join("");
+  var feitas=hs.filter(function(x){ return !x.atual && x.horas>0; });
+  var med=feitas.length ? feitas.reduce(function(a,x){ return a+x.horas; },0)/feitas.length : 0;
+  $("hist-sub").textContent = med ? 'média '+hm(med)+' por semana' : '';
+}
+</script>
+<script>
+/* ---------- turnos: ver e consertar ---------- */
+async function carregaTurnos(){
+  var ini = VISTA || (W && W.inicio_semana) || agora();
+  var r=await api("GET","api/turnos?semana="+ini);
+  VISTA=r.inicio_semana; TURNOS=r.turnos; pintaTurnos();
+}
+function opcoesTema(sel){
+  var lista=(W.temas||[]).slice();
+  if(sel && lista.indexOf(sel)<0) lista.push(sel);   /* tema antigo continua visivel */
+  return lista.map(function(x){
+    return '<option'+(x===sel?' selected':'')+'>'+esc(x)+'</option>';
+  }).join("");
+}
+function pintaTurnos(){
+  var atual = W && VISTA===W.inicio_semana;
+  $("atual").disabled=atual; $("prox").disabled=atual;
+  var fim=VISTA+6*86400;
+  $("turnos-sub").textContent=ddmm(VISTA)+" a "+ddmm(fim);
+  if(!TURNOS.length){
+    $("turnos").innerHTML='<tr><td class="vazio">Nenhum turno nesta semana. Esqueceu de bater? Lance abaixo.</td></tr>';
+    return;
+  }
+  var t=agora();
+  $("turnos").innerHTML='<tr><th>Dia</th><th>Início</th><th>Fim</th><th>Duração</th><th>Tema</th><th>Anotação</th><th></th></tr>'+
+    TURNOS.map(function(x){
+      var dur = (x.fim||t)-x.inicio;
+      return '<tr data-id="'+x.id+'">'+
+        '<td>'+DIAS[(new Date(x.inicio*1000).getDay()+6)%7]+' '+ddmm(x.inicio)+'</td>'+
+        '<td><input type="datetime-local" data-campo="inicio" value="'+local(x.inicio)+'" aria-label="Início"></td>'+
+        '<td><input type="datetime-local" data-campo="fim" value="'+local(x.fim)+'" aria-label="Fim"></td>'+
+        '<td class="dur num'+(x.fim?'':' rodando')+'">'+(x.fim?hm(dur/3600):'rodando')+'</td>'+
+        '<td><select data-campo="tema" aria-label="Tema">'+opcoesTema(x.tema)+'</select></td>'+
+        '<td><input type="text" data-campo="obs" maxlength="120" value="'+esc(x.obs)+'" aria-label="Anotação"></td>'+
+        '<td><button class="apaga" data-apaga="'+x.id+'" title="Apagar turno">Apagar</button></td></tr>';
+    }).join("");
+}
+$("turnos").addEventListener("change", async function(ev){
+  var el=ev.target, tr=el.closest("tr[data-id]"); if(!tr || !el.dataset.campo) return;
+  var campo=el.dataset.campo, corpo={};
+  if(campo==="inicio"){
+    if(!el.value){ aviso("O início não pode ficar vazio."); return carregaTurnos(); }
+    corpo.inicio=deLocal(el.value);
+  }else if(campo==="fim"){
+    corpo.fim=deLocal(el.value);
+  }else corpo[campo]=el.value;
+  try{
+    var r=await api("PATCH","api/turnos/"+tr.dataset.id, corpo);
+    W=r.semana; aviso("Turno salvo."); tudo();
+  }catch(e){ aviso("Não salvou: "+e.message); }
+  carregaTurnos();
+});
+$("turnos").addEventListener("click", async function(ev){
+  var b=ev.target.closest("[data-apaga]"); if(!b) return;
+  if(!confirm("Apagar este turno? Não dá pra desfazer.")) return;
+  var r=await api("DELETE","api/turnos/"+b.dataset.apaga);
+  W=r.semana; aviso("Turno apagado."); tudo(); carregaTurnos();
+});
+$("ant").onclick=function(){ VISTA=VISTA-6*86400; carregaTurnos(); };
+$("prox").onclick=function(){ VISTA=VISTA+8*86400; carregaTurnos(); };
+$("atual").onclick=function(){ VISTA=W.inicio_semana; carregaTurnos(); };
+
+$("lanca").addEventListener("submit", async function(ev){
+  ev.preventDefault();
+  var f=ev.target, ini=deLocal(f.inicio.value), fim=deLocal(f.fim.value);
+  if(fim<=ini){ aviso("O fim tem que vir depois do início."); return; }
+  try{
+    var r=await api("POST","api/turnos",{inicio:ini, fim:fim, tema:f.tema.value, obs:f.obs.value});
+    W=r.semana; f.reset(); aviso("Turno lançado."); tudo();
+    VISTA=ini; carregaTurnos();
+  }catch(e){ aviso("Não lançou: "+e.message); }
+});
+
+/* ---------- ajustes ---------- */
+function pintaAjustes(forca){
+  var m=$("meta");
+  if(document.activeElement!==m) m.value=W.meta;
+  $("lanca-tema").innerHTML=opcoesTema();
+  var box=$("temas");
+  if(!forca && box.contains(document.activeElement)) return;
+  box.innerHTML=(W.temas||[]).map(function(x,i){ return linhaTema(x,i,!conta(x)); }).join("");
+}
+function linhaTema(nome, i, fora){
+  return '<div class="tema-linha"><i style="background:'+CORES[i%CORES.length]+'"></i>'+
+    '<input type="text" maxlength="28" value="'+esc(nome)+'" aria-label="Nome do tema">'+
+    '<label><input type="checkbox"'+(fora?' checked':'')+'> não conta</label></div>';
+}
+$("meta").addEventListener("change", async function(){
+  try{
+    var r=await api("POST","api/meta",{horas:+this.value});
+    W=r.semana; aviso("Meta: "+hm(r.meta)+" por semana."); tudo();
+  }catch(e){ aviso("Não salvou: "+e.message); }
+});
+$("mais-tema").onclick=function(){
+  var box=$("temas"), n=box.children.length;
+  if(n>=6){ aviso("No máximo 6 temas."); return; }
+  box.insertAdjacentHTML("beforeend", linhaTema("", n, false));
+  box.lastElementChild.querySelector("input").focus();
+};
+$("salva-temas").onclick=async function(){
+  var linhas=[].slice.call($("temas").children);
+  var nomes=[], fora=[];
+  linhas.forEach(function(l){
+    var n=l.querySelector("input[type=text]").value.trim();
+    if(n && nomes.indexOf(n)<0){ nomes.push(n); if(l.querySelector("input[type=checkbox]").checked) fora.push(n); }
+  });
+  if(!nomes.length){ aviso("Precisa de pelo menos um tema."); return; }
+  try{
+    await api("POST","api/temas",{temas:nomes});
+    var r=await api("POST","api/temas-fora",{temas:fora});
+    W=r.semana; aviso("Temas salvos."); tudo(true); pintaTurnos();
+  }catch(e){ aviso("Não salvou: "+e.message); }
+};
+
+/* ---------- bater pelo painel ---------- */
+$("agora").addEventListener("click", async function(ev){
+  var b=ev.target.closest("button[data-acao]"); if(!b) return;
+  b.disabled=true;
+  try{
+    var r=await api("POST","api/ponto",{acao:b.dataset.acao, tema:b.dataset.tema||null});
+    W=r.semana; aviso(r.texto); tudo(); carregaTurnos();
+  }catch(e){ aviso("Não bateu: "+e.message); b.disabled=false; }
+});
+
+/* ---------- laco ---------- */
+function pintaCon(){
+  var c=$("con");
+  c.className="con "+(ONLINE===true?"on":ONLINE===false?"off":"");
+  c.querySelector("span").textContent = ONLINE===true?"ao vivo":ONLINE===false?"sem conexão":"conectando";
+}
+function tudo(forca){
+  if(!W) return;
+  $("sair").hidden=!W.com_senha;
+  pintaAgora(); pintaSemana(); pintaDias(); pintaHist(); pintaAjustes(forca);
+}
+async function busca(){
+  try{
+    var primeira=!W;
+    W=await api("GET","api/semana"); ONLINE=true; tudo();
+    if(primeira) carregaTurnos();
+  }catch(e){ ONLINE=false; }
+  pintaCon();
+}
+setInterval(function(){
+  if(!W) return;
+  var rel=$("rel"); if(rel && W.rodando) rel.textContent=relogio(vivo().seg);
+}, 1000);
+setInterval(function(){ if(W && !document.hidden) pintaSemana(); }, 15000);
+setInterval(function(){ if(!document.hidden) busca(); }, 30000);
+document.addEventListener("visibilitychange", function(){ if(!document.hidden) busca(); });
+busca();
+</script>
+</body>
+</html>

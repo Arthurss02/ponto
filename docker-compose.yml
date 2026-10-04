@@ -1,0 +1,13 @@
+# docker compose up -d   ->  http://IP-DO-SERVIDOR:8095/
+services:
+  ponto:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    environment:
+      TZ: America/Sao_Paulo
+      # numa VPS isto e obrigatorio. Troque por uma senha sua.
+      PONTO_SENHA: troque-esta-senha
+    volumes:
+      - ./dados:/dados

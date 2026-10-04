@@ -1,0 +1,17 @@
+{
+  "name": "Ponto",
+  "short_name": "Ponto",
+  "description": "Bater o ponto da semana de trabalho",
+  "start_url": "app",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f5f1",
+  "theme_color": "#ffffff",
+  "lang": "pt-BR",
+  "icons": [
+    {"src": "icone-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icone-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
