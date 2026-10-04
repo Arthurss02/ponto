@@ -215,6 +215,8 @@ CSV (link **Exportar CSV**).
 
 ## Desenvolvimento
 
+O que cada arquivo faz e quais verificações de segurança tem: [`ARQUIVOS.md`](ARQUIVOS.md).
+
 ```bash
 python3 -m unittest discover -s tests -v
 
