@@ -36,6 +36,7 @@
 <script>
   var q=new URLSearchParams(location.search);
   if(q.get("erro")) document.getElementById("erro").hidden=false;
+  /* SEGURANCA: so aceita voltar pra "app"; o servidor confere de novo. */
   document.getElementById("volta").value=q.get("volta")==="app"?"app":"";
 </script>
 </body>

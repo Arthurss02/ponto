@@ -237,6 +237,9 @@ var W=null, ONLINE=null, SEM_TURNOS=null, VISTA=null, TURNOS=[];
 
 function $(id){ return document.getElementById(id); }
 function agora(){ return Math.floor(Date.now()/1000); }
+/* SEGURANCA: todo texto que vem do servidor (tema, anotacao, nome de maquina)
+   passa por esc() antes de ir pro innerHTML. Sem isso, um tema chamado
+   <img onerror=...> rodaria script no seu painel. */
 function esc(t){
   return String(t==null?"":t).replace(/[<>&"]/g,function(c){
     return {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c];});
@@ -275,6 +278,7 @@ async function api(metodo, url, corpo){
   var r=await fetch(url,{method:metodo, cache:"no-store",
     headers:corpo?{"Content-Type":"application/json"}:{},
     body:corpo?JSON.stringify(corpo):undefined});
+  /* SEGURANCA: sessao expirou ou senha trocada: volta pro login. */
   if(r.status===401){ location.href="entrar"; throw new Error("senha"); }
   var d=await r.json().catch(function(){ return {}; });
   if(!r.ok) throw new Error(d.erro||("http "+r.status));
@@ -431,6 +435,8 @@ function pintaTurnos(){
   $("turnos").innerHTML='<tr><th>Dia</th><th>Início</th><th>Fim</th><th>Duração</th><th>Tema</th><th>Anotação</th><th></th></tr>'+
     TURNOS.map(function(x){
       var dur = (x.fim||t)-x.inicio;
+      /* SEGURANCA: turno de outra maquina aparece sem campos editaveis (e o
+         servidor recusa a edicao de qualquer jeito). */
       if(x.origem){
         /* veio de outra maquina: so ela conserta, senao o proximo envio desfaz */
         return '<tr title="Turno de '+esc(x.origem)+' — conserte lá">'+
@@ -466,6 +472,7 @@ $("turnos").addEventListener("change", async function(ev){
 });
 $("turnos").addEventListener("click", async function(ev){
   var b=ev.target.closest("[data-apaga]"); if(!b) return;
+  /* SEGURANCA: apagar pede confirmacao. */
   if(!confirm("Apagar este turno? Não dá pra desfazer.")) return;
   var r=await api("DELETE","api/turnos/"+b.dataset.apaga);
   W=r.semana; aviso("Turno apagado."); tudo(); carregaTurnos();

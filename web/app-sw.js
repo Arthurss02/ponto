@@ -17,9 +17,12 @@ self.addEventListener("activate", function(e){
 });
 self.addEventListener("fetch", function(e){
   var u = new URL(e.request.url);
+  /* SEGURANCA: nada de /api/ fica em cache (seus dados nao ficam guardados
+     no service worker). */
   if(e.request.method !== "GET" || u.pathname.indexOf("/api/") >= 0) return;
   e.respondWith(fetch(e.request).then(function(r){
     /* so guarda resposta boa: a tela de senha (redirect) nao vira a casca */
+    /* SEGURANCA: so guarda resposta boa: a tela de login nao vira o app offline. */
     if(r.ok && !r.redirected){
       var copia = r.clone();
       caches.open(CACHE).then(function(c){ c.put(e.request, copia); });

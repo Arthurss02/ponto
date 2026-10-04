@@ -140,6 +140,7 @@ var FILA=le(CHAVE_FILA, []);
 S=le(CHAVE_ULTIMA, null);
 
 function agora(){ return Math.floor(Date.now()/1000); }
+/* SEGURANCA: tema vindo do servidor passa por esc() antes do innerHTML. */
 function esc(t){
   return String(t==null?"":t).replace(/[<>&"]/g,function(c){
     return {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c];});
@@ -316,6 +317,7 @@ async function pede(metodo, url, corpo){
     var r=await fetch(url,{method:metodo, cache:"no-store", signal:ctl.signal,
       headers:corpo?{"Content-Type":"application/json"}:{},
       body:corpo?JSON.stringify(corpo):undefined});
+    /* SEGURANCA: sem sessao vai pro login; a batida fica guardada na fila. */
     if(r.status===401){ location.href="entrar?volta=app"; throw new Error("senha"); }
     if(!r.ok) throw new Error("http "+r.status);
     return await r.json();
@@ -372,6 +374,7 @@ esvazia().then(busca);
    navegador so deixa registrar em HTTPS. Por IP (http) isto nao roda e tudo
    bem - o app funciona online e a fila cobre as quedas. No dia em que o
    endereco virar https, liga sozinho. */
+/* SEGURANCA: service worker so em HTTPS (regra do navegador). */
 if("serviceWorker" in navigator && window.isSecureContext){
   navigator.serviceWorker.register("app-sw.js",{scope:"./app"}).catch(function(){});
 }

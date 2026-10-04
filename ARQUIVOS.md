@@ -2,6 +2,9 @@
 
 Tudo roda com a biblioteca padrão do Python 3.9+.
 
+Cada proteção também está marcada no próprio código com um comentário
+`SEGURANCA:`. Pra listar todas: `grep -rn SEGURANCA servidor web`.
+
 ## servidor/ponto.py
 
 O servidor inteiro: banco, regras da semana, API, login, envio pro central

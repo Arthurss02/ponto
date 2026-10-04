@@ -25,6 +25,13 @@ guarda tudo. Configuracao por variavel de ambiente:
 Tudo isso tambem pode ir num arquivo ponto.env na raiz do projeto
 (CHAVE=valor por linha); variavel de ambiente de verdade ganha do arquivo.
 
+SEGURANCA: todo ponto do codigo que protege alguma coisa tem um comentario
+comecando com "SEGURANCA:". Pra ver todos:  grep -rn SEGURANCA servidor web
+Resumo: nao executa shell nem nada do sistema (so acoes do Ponto, lista
+fechada); so entrega arquivos de uma lista fechada; SQL sempre com
+parametro; tamanho de tudo que entra e limitado; com PONTO_SENHA, tudo pede
+login (cookie HMAC ou Bearer) e o central nao aceita nada sem senha.
+
 Regras que valem estar escritas:
  - a semana comeca na SEGUNDA 00:00. Domingo a noite ainda e a semana velha.
  - um turno conta inteiro no dia em que COMECOU: 22h-02h e um turno de 4h no
@@ -66,6 +73,8 @@ def le_arquivo_env(caminho):
                 continue
             k, v = linha.split("=", 1)
             k, v = k.strip(), v.strip().strip('"').strip("'")
+            # SEGURANCA: o ponto.env so mexe em PONTO_* e TZ (nao da pra injetar PATH,
+            #   PYTHONPATH etc. por ele) e nunca passa por cima do ambiente real.
             if k.startswith("PONTO_") or k == "TZ":
                 os.environ.setdefault(k, v)
     if os.environ.get("TZ") and hasattr(time, "tzset"):
@@ -101,6 +110,9 @@ _trava = threading.Lock()
 def conexao():
     """Uma conexao por operacao, uma operacao por vez. E um app de uma pessoa:
     serializar tudo custa nada e tira qualquer corrida entre dois toques."""
+    # SEGURANCA: uma operacao no banco por vez + rollback em erro: dois toques
+    #   ao mesmo tempo nao corrompem nada. Todo SQL do arquivo usa "?" (parametro),
+    #   nunca texto do usuario colado na consulta - sem injecao de SQL.
     with _trava:
         c = sqlite3.connect(BANCO, timeout=10)
         c.row_factory = sqlite3.Row
@@ -174,6 +186,7 @@ def grava_ajuste(c, chave, valor):
 
 # ------------------------------------------------------------------ temas e meta
 
+# SEGURANCA: todo nome de tema que entra passa aqui: corta em 28 caracteres.
 def limpa_nome(x):
     return str(x if x is not None else "").strip()[:28]
 
@@ -184,6 +197,7 @@ def temas(c):
         try:
             lista = [limpa_nome(x) for x in json.loads(bruto) if limpa_nome(x)]
             if lista:
+                # SEGURANCA: no maximo 6 temas, mesmo que o banco tenha mais.
                 return lista[:MAX_TEMAS]
         except (TypeError, ValueError):
             pass
@@ -233,6 +247,7 @@ def muda_temas(lista):
 
 
 def muda_meta(horas):
+    # SEGURANCA: meta presa entre 1 e 168 h (float() invalido vira erro 400).
     h = max(1.0, min(168.0, float(horas)))
     with conexao() as c:
         grava_ajuste(c, "meta_semana", str(h))
@@ -262,6 +277,8 @@ def hora_da_batida(quando, agora):
         q = int(quando)
     except (TypeError, ValueError):
         return agora
+    # SEGURANCA: hora vinda do cliente nao e confiavel: futuro ou mais velha que
+    #   7 dias vira "agora". Ninguem planta turno no passado distante por aqui.
     if q > agora or q < agora - PONTO_ATRASO_MAX:
         return agora
     return q
@@ -281,6 +298,7 @@ def bate_ponto(acao, tema=None, quando=None):
     with conexao() as c:
         aberto = turno_aberto(c)
         lista = temas(c)
+        # SEGURANCA: tema que nao existe na lista e ignorado (cai no primeiro).
         if pedido and pedido not in lista:
             pedido = ""
         if acao == "alterna":
@@ -386,6 +404,7 @@ def cria_turno(d):
         if fim is None and turno_aberto(c):
             fim = ini    # dois cronometros rodando ao mesmo tempo nao existe
         cur = c.execute("INSERT INTO turnos (inicio,fim,obs,tema) VALUES (?,?,?,?)",
+                        # SEGURANCA: anotacao cortada em 120 caracteres.
                         (ini, fim, str(d.get("obs") or "")[:120],
                          limpa_nome(d.get("tema")) or temas(c)[0]))
         return cur.lastrowid
@@ -410,8 +429,11 @@ def muda_turno(tid, campos):
     if not sets:
         return None
     with conexao() as c:
+        # SEGURANCA: turno que veio de outra maquina nao se edita aqui.
         if c.execute("SELECT 1 FROM turnos WHERE id=? AND origem<>''", (tid,)).fetchone():
             return None   # veio de outra maquina: o proximo envio desfaria o conserto
+        # SEGURANCA: o UPDATE e montado so com nomes de coluna fixos (inicio, fim,
+        #   obs, tema) escritos acima; os valores vao como parametro "?".
         c.execute("UPDATE turnos SET " + ",".join(sets) + " WHERE id=?", vals + [tid])
         r = c.execute("SELECT * FROM turnos WHERE id=?", (tid,)).fetchone()
         # fim antes do inicio viraria hora negativa na semana inteira
@@ -423,6 +445,7 @@ def muda_turno(tid, campos):
 
 def apaga_turno(tid):
     with conexao() as c:
+        # SEGURANCA: so apaga turno desta maquina, nunca um recebido.
         return c.execute("DELETE FROM turnos WHERE id=? AND origem=''", (tid,)).rowcount > 0
 
 
@@ -469,6 +492,8 @@ def receber(d):
     except (TypeError, ValueError):
         raise ValueError("desde invalido")
     turnos = d.get("turnos")
+    # SEGURANCA: lote recebido: no maximo 20.000 turnos, origem com 40 caracteres,
+    #   turno antes do "desde" descartado, fim antes do inicio vira zero.
     if not isinstance(turnos, list) or len(turnos) > 20000:
         raise ValueError("turnos invalidos")
     limpos = []
@@ -490,6 +515,7 @@ def receber(d):
         c.execute("INSERT INTO maquinas (nome,ultimo_envio,estado) VALUES (?,?,?)"
                   " ON CONFLICT(nome) DO UPDATE SET ultimo_envio=excluded.ultimo_envio,"
                   " estado=excluded.estado",
+                  # SEGURANCA: o "estado" que a maquina manda e guardado cortado em 4 KB.
                   (origem, int(time.time()), json.dumps(estado, ensure_ascii=False)[:4000]))
     return {"ok": True, "origem": origem, "recebidos": len(limpos)}
 
@@ -561,6 +587,11 @@ def laco_envio():
 # "rode este comando no sistema": quem invadisse o central teria todas as
 # maquinas na mao.
 
+# SEGURANCA: O SERVIDOR NAO EXECUTA SHELL. Esta e a lista fechada de tudo que o
+#   central pode pedir pra outra maquina, e tudo mexe so no Ponto. Nao existe
+#   os.system, subprocess, eval ou exec neste arquivo. Se um dia alguem
+#   invadir o central, ganha o seu ponto, nao o computador das maquinas.
+#   Antes de acrescentar um item aqui, pense: "e se o central for de outro?"
 COMANDOS = ("ponto", "lanca_turno", "muda_turno", "apaga_turno", "temas", "temas_fora", "meta")
 COMANDO_VALIDADE = 7 * 86400   # comando que a maquina nao buscou em 7 dias caduca
 ESPERA_MAX = 25
@@ -572,12 +603,14 @@ def enfileira_comando(origem, acao, dados):
     origem = str(origem or "").strip()[:40]
     if not origem:
         raise ValueError("falta a maquina (origem)")
+    # SEGURANCA: primeira barreira: comando fora da lista nem entra na fila.
     if acao not in COMANDOS:
         raise ValueError("comando desconhecido: use " + ", ".join(COMANDOS))
     if not isinstance(dados, dict):
         dados = {}
     with conexao() as c:
         cid = c.execute("INSERT INTO comandos (origem,acao,dados,criado_em) VALUES (?,?,?,?)",
+                        # SEGURANCA: dados do comando cortados em 8 KB.
                         (origem, acao, json.dumps(dados, ensure_ascii=False)[:8000],
                          int(time.time()))).lastrowid
     with _chegou_comando:
@@ -589,6 +622,7 @@ def _pendentes(c, origem):
     agora = int(time.time())
     linhas = [dict(r) for r in c.execute(
         "SELECT id,acao,dados,criado_em FROM comandos WHERE origem=? AND feito_em IS NULL"
+        # SEGURANCA: comando com mais de 7 dias caduca; no maximo 50 por entrega.
         " AND criado_em>? ORDER BY id LIMIT 50", (origem, agora - COMANDO_VALIDADE))]
     for l in linhas:
         try:
@@ -604,6 +638,7 @@ def busca_comandos(origem, espera):
     origem = str(origem or "").strip()[:40]
     if not origem:
         raise ValueError("falta origem")
+    # SEGURANCA: a espera pendurada e no maximo 25 s (nao prende thread pra sempre).
     fim = time.time() + max(0, min(ESPERA_MAX, espera))
     while True:
         with conexao() as c:
@@ -625,6 +660,7 @@ def registra_resultados(origem, resultados):
     origem = str(origem or "").strip()[:40]
     n = 0
     with conexao() as c:
+        # SEGURANCA: uma maquina so marca comandos dela (WHERE origem=?), ate 100 por vez.
         for r in (resultados or [])[:100]:
             if not isinstance(r, dict) or _inteiro(r.get("id")) is None:
                 continue
@@ -654,6 +690,9 @@ def maquinas():
     return lista
 
 
+# SEGURANCA: segunda barreira, do lado da maquina: mesmo que o central mande
+#   qualquer coisa, so o que esta neste if/elif roda. O resto vira "comando
+#   desconhecido". Nada aqui chama o sistema operacional.
 def executa_comando(cmd):
     """O lado da maquina. So o que esta na lista, cada um com o mesmo codigo
     que o painel daqui usaria."""
@@ -663,6 +702,7 @@ def executa_comando(cmd):
     try:
         if acao == "ponto":
             qual = d.get("acao") or "alterna"
+            # SEGURANCA: acao de ponto validada de novo na maquina.
             if qual not in ("entra", "sai", "alterna", "troca"):
                 return {"ok": False, "erro": "acao de ponto invalida"}
             # a hora e a do clique no central: comando que esperou a maquina
@@ -699,6 +739,8 @@ def atende_comandos(lista):
         if cid is None:
             continue
         with conexao() as c:
+            # SEGURANCA: comando repetido nao roda duas vezes (resposta perdida no
+            #   caminho faz o central reenviar).
             ja = c.execute("SELECT resposta FROM comandos_feitos WHERE id_central=?", (cid,)).fetchone()
         if ja:
             r = json.loads(ja["resposta"])
@@ -929,6 +971,8 @@ def semana(quando=None):
 COOKIE = "ponto"
 
 
+# SEGURANCA: sessao = HMAC-SHA256 da senha. O navegador guarda isso, nao a
+#   senha. Trocar a PONTO_SENHA invalida todos os cookies de uma vez.
 def ficha():
     """Valor do cookie de sessao. Derivado da senha: trocar a PONTO_SENHA
     desloga todos os aparelhos de uma vez, sem tabela de sessoes."""
@@ -943,9 +987,13 @@ def le_cookie(cabecalho, nome):
     return ""
 
 
+# SEGURANCA: a porta de entrada de tudo que precisa de senha. Sem PONTO_SENHA,
+#   tudo e aberto (ok em casa/Tailscale, NUNCA na internet).
 def autorizado(h):
     if not SENHA:
         return True
+    # SEGURANCA: compare_digest em vez de ==: comparacao em tempo constante, nao
+    #   da pra descobrir a senha medindo quanto a resposta demora.
     if hmac.compare_digest(le_cookie(h.headers.get("Cookie"), COOKIE), ficha()):
         return True
     # atalho do celular (iOS Atalhos, Tasker...) manda a senha no cabecalho
@@ -957,6 +1005,8 @@ def autorizado(h):
 
 # ------------------------------------------------------------------ http
 
+# SEGURANCA: lista fechada de arquivos que o servidor entrega. Caminho que nao
+#   esta aqui da 404 - nao da pra pedir ../servidor/ponto.py, dados/ponto.db etc.
 ESTATICOS = {
     # caminho -> (arquivo em web/, tipo). Lista fechada: nada fora dela sai.
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -971,8 +1021,10 @@ ESTATICOS = {
 }
 # o que abre sem senha: a tela de entrar e o que o celular pede pra montar o
 # icone na tela de inicio antes de ter o cookie
+# SEGURANCA: o que abre sem senha. Nada daqui tem dado seu.
 PUBLICOS = {"/entrar", "/app.webmanifest", "/icone-180.png", "/icone-192.png",
             "/icone-512.png", "/favicon.ico"}
+# SEGURANCA: corpo de requisicao maior que 64 KB e recusado.
 CORPO_MAX = 64 * 1024
 
 
@@ -987,6 +1039,8 @@ class Ponto(BaseHTTPRequestHandler):
         self.send_header("Content-Type", tipo)
         self.send_header("Content-Length", str(len(corpo)))
         self.send_header("Cache-Control", "no-store")
+        # SEGURANCA: nosniff: navegador nao "adivinha" tipo de arquivo; no-store: nada
+        #   fica em cache de proxy; same-origin: o endereco nao vaza pra outros sites.
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
         for k, v in (extra or {}).items():
@@ -1026,8 +1080,11 @@ class Ponto(BaseHTTPRequestHandler):
         if "application/x-www-form-urlencoded" in tipo:
             return {k: v[0] for k, v in parse_qs(bruto.decode("utf-8", "replace")).items()}
         d = json.loads(bruto.decode("utf-8") or "{}")
+        # SEGURANCA: JSON tem que ser objeto; lista/numero/texto vira {} vazio.
         return d if isinstance(d, dict) else {}
 
+    # SEGURANCA: chamada no comeco de todo GET/POST/PATCH/DELETE: sem senha, API
+    #   responde 401 e pagina manda pro login.
     def _porta_fechada(self, u):
         """Devolve True se respondeu 'precisa de senha'."""
         if u.path in PUBLICOS or autorizado(self):
@@ -1072,6 +1129,8 @@ class Ponto(BaseHTTPRequestHandler):
             return self._json(200, {"maquinas": maquinas()})
         if u.path == "/api/comandos":
             if not SENHA:
+                # SEGURANCA: receber turnos/comandos sem senha deixaria qualquer um escrever
+                #   no seu ponto. Central sem PONTO_SENHA recusa.
                 return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
             try:
                 espera = _inteiro((q.get("espera") or [""])[0]) or 0
@@ -1097,6 +1156,7 @@ class Ponto(BaseHTTPRequestHandler):
             return
         if u.path == "/api/ponto":
             acao = d.get("acao") or "alterna"
+            # SEGURANCA: acao de ponto fora da lista = 400.
             if acao not in ("entra", "sai", "alterna", "troca"):
                 return self._json(400, {"erro": "acao: entra, sai, alterna ou troca"})
             r = bate_ponto(acao, d.get("tema"), d.get("quando"))
@@ -1108,6 +1168,8 @@ class Ponto(BaseHTTPRequestHandler):
             if not SENHA:
                 # receber de qualquer um sem senha seria deixar a internet
                 # escrever no seu ponto
+                # SEGURANCA: receber turnos/comandos sem senha deixaria qualquer um escrever
+                #   no seu ponto. Central sem PONTO_SENHA recusa.
                 return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
             try:
                 return self._json(200, receber(d))
@@ -1115,6 +1177,8 @@ class Ponto(BaseHTTPRequestHandler):
                 return self._json(400, {"erro": str(e)})
         if u.path == "/api/comandos":
             if not SENHA:
+                # SEGURANCA: receber turnos/comandos sem senha deixaria qualquer um escrever
+                #   no seu ponto. Central sem PONTO_SENHA recusa.
                 return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
             try:
                 cid = enfileira_comando(d.get("origem"), d.get("acao"), d.get("dados"))
@@ -1123,6 +1187,8 @@ class Ponto(BaseHTTPRequestHandler):
             return self._json(201, {"ok": True, "id": cid})
         if u.path == "/api/comandos/resultado":
             if not SENHA:
+                # SEGURANCA: receber turnos/comandos sem senha deixaria qualquer um escrever
+                #   no seu ponto. Central sem PONTO_SENHA recusa.
                 return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
             return self._json(200, {"ok": True, "marcados": registra_resultados(
                 d.get("origem"), d.get("resultados"))})
@@ -1181,13 +1247,19 @@ class Ponto(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "semana": semana()})
 
     def _entrar(self, d):
+        # SEGURANCA: depois do login so volta pra "app" ou "./": ninguem usa o seu
+        #   login pra mandar a pessoa pra um site falso.
         volta = "app" if d.get("volta") == "app" else "./"
         if not SENHA:
             return self._vai(volta)
         if not hmac.compare_digest(str(d.get("senha") or ""), SENHA):
+            # SEGURANCA: senha errada demora 1 s: chute em serie fica lento.
             time.sleep(1.0)   # chute em serie fica lento sem estado nenhum
             return self._vai("entrar?erro=1" + ("&volta=app" if volta == "app" else ""))
         seguro = "; Secure" if (self.headers.get("X-Forwarded-Proto") == "https") else ""
+        # SEGURANCA: HttpOnly: JavaScript nao le o cookie. SameSite=Lax: outro site
+        #   nao consegue fazer POST na sua API usando o seu login. Secure quando
+        #   atras de HTTPS (o cookie nao viaja aberto).
         biscoito = "%s=%s; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax%s" % (
             COOKIE, ficha(), seguro)
         return self._vai(volta, {"Set-Cookie": biscoito})
@@ -1206,11 +1278,13 @@ def main():
         "localhost" if not aberto_pra_rede else HOST, PORTA), flush=True)
     print("Banco: %s" % BANCO, flush=True)
     if not SENHA and aberto_pra_rede:
+        # SEGURANCA: avisa no terminal quando esta aberto pra rede sem senha.
         print("AVISO: sem PONTO_SENHA e escutando na rede. Em casa/Tailscale tudo bem;"
               " numa VPS defina PONTO_SENHA e ponha HTTPS na frente.", flush=True)
     if DESTINO:
         if DESTINO.startswith("http://") and not any(
                 h in DESTINO for h in ("localhost", "127.0.0.1", "192.168.", "10.", "100.")):
+            # SEGURANCA: avisa quando a senha do central iria aberta (http).
             print("AVISO: enviando por http pra internet - a senha vai aberta. Use https.",
                   flush=True)
         print("Enviando pra %s a cada %ds como '%s'" % (DESTINO, ENVIAR_A_CADA, NOME), flush=True)
