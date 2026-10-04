@@ -13,6 +13,15 @@ guarda tudo. Configuracao por variavel de ambiente:
     PONTO_SENHA   se definida, pede senha. OBRIGATORIA numa VPS/internet.
     TZ            fuso: a semana vira na segunda 00:00 DESTE fuso
 
+    Enviar pra um Ponto central (desligado se vazio):
+    PONTO_ENVIAR_PARA   ex.: https://ponto.seudominio.com
+    PONTO_ENVIAR_SENHA  a PONTO_SENHA do central
+    PONTO_ENVIAR_A_CADA segundos entre envios (padrao 300)
+    PONTO_NOME          nome desta maquina no central (padrao: hostname)
+
+Tudo isso tambem pode ir num arquivo ponto.env na raiz do projeto
+(CHAVE=valor por linha); variavel de ambiente de verdade ganha do arquivo.
+
 Regras que valem estar escritas:
  - a semana comeca na SEGUNDA 00:00. Domingo a noite ainda e a semana velha.
  - um turno conta inteiro no dia em que COMECOU: 22h-02h e um turno de 4h no
@@ -29,19 +38,47 @@ import hmac
 import io
 import json
 import os
+import socket
 import sqlite3
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def le_arquivo_env(caminho):
+    """ponto.env: chegar numa maquina nova, clonar, copiar este arquivo e
+    rodar. So preenche o que o ambiente ainda nao tem."""
+    if not caminho or not os.path.isfile(caminho):
+        return
+    with open(caminho, encoding="utf-8") as f:
+        for linha in f:
+            linha = linha.strip()
+            if not linha or linha.startswith("#") or "=" not in linha:
+                continue
+            k, v = linha.split("=", 1)
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k.startswith("PONTO_") or k == "TZ":
+                os.environ.setdefault(k, v)
+    if os.environ.get("TZ") and hasattr(time, "tzset"):
+        time.tzset()
+
+
+le_arquivo_env(os.environ.get("PONTO_ENV", os.path.join(RAIZ, "ponto.env")))
 SITE = os.path.join(RAIZ, "web")
 BANCO = os.environ.get("PONTO_BANCO") or os.path.join(RAIZ, "dados", "ponto.db")
 PORTA = int(os.environ.get("PONTO_PORTA") or 8095)
 HOST = os.environ.get("PONTO_HOST") or "0.0.0.0"
 SENHA = os.environ.get("PONTO_SENHA") or ""
+DESTINO = (os.environ.get("PONTO_ENVIAR_PARA") or "").strip().rstrip("/")
+DESTINO_SENHA = os.environ.get("PONTO_ENVIAR_SENHA") or ""
+ENVIAR_A_CADA = max(30, int(os.environ.get("PONTO_ENVIAR_A_CADA") or 300))
+NOME = (os.environ.get("PONTO_NOME") or socket.gethostname().split(".")[0] or "ponto")[:40]
 
 META_PADRAO = 40.0            # horas por semana; cada um muda no painel
 TURNO_ESQUECIDO = 16 * 3600   # aberto mais que isso e esquecimento, nao jornada
@@ -85,6 +122,13 @@ def cria_banco():
             obs TEXT DEFAULT '',
             tema TEXT DEFAULT '')""")
         c.execute("CREATE INDEX IF NOT EXISTS ix_turnos_inicio ON turnos(inicio)")
+        # turno que veio de outra maquina: origem = nome dela, id_origem = id
+        # la. Os daqui tem origem ''. So a maquina de origem conserta o turno.
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(turnos)")]
+        if "origem" not in cols:
+            c.execute("ALTER TABLE turnos ADD COLUMN origem TEXT NOT NULL DEFAULT ''")
+        if "id_origem" not in cols:
+            c.execute("ALTER TABLE turnos ADD COLUMN id_origem INTEGER")
         c.execute("""CREATE TABLE IF NOT EXISTS ajustes (
             chave TEXT PRIMARY KEY,
             valor TEXT NOT NULL)""")
@@ -176,8 +220,9 @@ def inicio_da_semana(quando=None):
 
 
 def turno_aberto(c):
+    # so o daqui: o cronometro que esta rodando em outra maquina nao e este
     return c.execute(
-        "SELECT * FROM turnos WHERE fim IS NULL ORDER BY inicio DESC LIMIT 1").fetchone()
+        "SELECT * FROM turnos WHERE fim IS NULL AND origem='' ORDER BY inicio DESC LIMIT 1").fetchone()
 
 
 def hora_da_batida(quando, agora):
@@ -241,7 +286,8 @@ def bate_ponto(acao, tema=None, quando=None):
                 # batida atrasada nao pode comecar dentro de um turno que ja
                 # fechou depois dela: seria hora contada duas vezes
                 r = c.execute("SELECT MAX(fim) AS f FROM turnos"
-                              " WHERE fim IS NOT NULL AND fim > ?", (t_bat,)).fetchone()
+                              " WHERE fim IS NOT NULL AND fim > ? AND origem=''",
+                              (t_bat,)).fetchone()
                 if r and r["f"]:
                     t_bat = min(max(t_bat, r["f"]), agora)
             t = pedido or lista[0]
@@ -336,6 +382,8 @@ def muda_turno(tid, campos):
     if not sets:
         return None
     with conexao() as c:
+        if c.execute("SELECT 1 FROM turnos WHERE id=? AND origem<>''", (tid,)).fetchone():
+            return None   # veio de outra maquina: o proximo envio desfaria o conserto
         c.execute("UPDATE turnos SET " + ",".join(sets) + " WHERE id=?", vals + [tid])
         r = c.execute("SELECT * FROM turnos WHERE id=?", (tid,)).fetchone()
         # fim antes do inicio viraria hora negativa na semana inteira
@@ -347,29 +395,113 @@ def muda_turno(tid, campos):
 
 def apaga_turno(tid):
     with conexao() as c:
-        c.execute("DELETE FROM turnos WHERE id=?", (tid,))
+        return c.execute("DELETE FROM turnos WHERE id=? AND origem=''", (tid,)).rowcount > 0
 
 
 def turnos_da_semana(ini):
     ini = inicio_da_semana(ini)
     with conexao() as c:
         linhas = [dict(r) for r in c.execute(
-            "SELECT id,inicio,fim,obs,tema FROM turnos"
-            " WHERE inicio>=? AND inicio<? ORDER BY inicio", (ini, ini + 7 * 86400))]
+            "SELECT id,inicio,fim,obs,tema,origem FROM turnos"
+            " WHERE inicio>=? AND inicio<? ORDER BY inicio", (ini, inicio_da_semana(ini + 8 * 86400)))]
     return {"inicio_semana": ini, "turnos": linhas}
 
 
 def exporta_csv():
     with conexao() as c:
-        linhas = list(c.execute("SELECT id,inicio,fim,tema,obs FROM turnos ORDER BY inicio"))
+        linhas = list(c.execute("SELECT id,inicio,fim,tema,obs,origem FROM turnos ORDER BY inicio"))
     s = io.StringIO()
     w = csv.writer(s)
-    w.writerow(["id", "inicio", "fim", "horas", "tema", "obs"])
+    w.writerow(["id", "inicio", "fim", "horas", "tema", "obs", "maquina"])
     fmt = lambda t: datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else ""
     for r in linhas:
         horas = "" if r["fim"] is None else "%.2f" % ((r["fim"] - r["inicio"]) / 3600.0)
-        w.writerow([r["id"], fmt(r["inicio"]), fmt(r["fim"]), horas, r["tema"], r["obs"]])
+        w.writerow([r["id"], fmt(r["inicio"]), fmt(r["fim"]), horas, r["tema"], r["obs"],
+                    r["origem"] or NOME])
     return s.getvalue()
+
+
+# ------------------------------------------------------------------ varias maquinas
+
+JANELA_ENVIO = 35 * 86400   # quanto pra tras cada envio regrava (consertos e apagados)
+_acorda_envio = threading.Event()
+ENVIO = {"destino": DESTINO, "nome": NOME, "ultimo_ok": None, "erro": None}
+
+
+def receber(d):
+    """O lado central. Uma maquina manda os turnos DELA a partir de 'desde';
+    aqui os daquela origem a partir de 'desde' sao trocados pelo que chegou.
+    Trocar em vez de somar e o que faz conserto e turno apagado la chegarem
+    aqui, e mandar a mesma coisa duas vezes nao duplicar nada."""
+    origem = str(d.get("origem") or "").strip()[:40]
+    if not origem:
+        raise ValueError("falta origem")
+    try:
+        desde = max(0, int(d.get("desde") or 0))
+    except (TypeError, ValueError):
+        raise ValueError("desde invalido")
+    turnos = d.get("turnos")
+    if not isinstance(turnos, list) or len(turnos) > 20000:
+        raise ValueError("turnos invalidos")
+    limpos = []
+    for t in turnos:
+        if not isinstance(t, dict):
+            continue
+        ini, fim = _inteiro(t.get("inicio")), _inteiro(t.get("fim"))
+        if not ini or ini < desde:
+            continue
+        if fim is not None and fim < ini:
+            fim = ini
+        limpos.append((ini, fim, str(t.get("obs") or "")[:120], limpa_nome(t.get("tema")),
+                       origem, _inteiro(t.get("id"))))
+    with conexao() as c:
+        c.execute("DELETE FROM turnos WHERE origem=? AND inicio>=?", (origem, desde))
+        c.executemany("INSERT INTO turnos (inicio,fim,obs,tema,origem,id_origem)"
+                      " VALUES (?,?,?,?,?,?)", limpos)
+    return {"ok": True, "origem": origem, "recebidos": len(limpos)}
+
+
+def envia_uma_vez():
+    """O lado de quem viaja: manda os turnos DAQUI (nunca os recebidos, senao
+    duas maquinas ficariam se reenviando). A primeira vez pra um destino vai
+    tudo; depois, so as ultimas 5 semanas."""
+    with conexao() as c:
+        completo = ajuste(c, "envio_completo") != DESTINO
+        desde = 0 if completo else int(time.time()) - JANELA_ENVIO
+        linhas = [dict(r) for r in c.execute(
+            "SELECT id,inicio,fim,tema,obs FROM turnos WHERE origem='' AND inicio>=?"
+            " ORDER BY inicio", (desde,))]
+    corpo = json.dumps({"origem": NOME, "desde": desde, "turnos": linhas}).encode("utf-8")
+    cab = {"Content-Type": "application/json", "User-Agent": "Ponto/1"}
+    if DESTINO_SENHA:
+        cab["Authorization"] = "Bearer " + DESTINO_SENHA
+    req = urllib.request.Request(DESTINO + "/api/receber", data=corpo, headers=cab, method="POST")
+    with urllib.request.urlopen(req, timeout=20) as r:
+        r.read()
+    if completo:
+        with conexao() as c:
+            grava_ajuste(c, "envio_completo", DESTINO)
+    return len(linhas)
+
+
+def laco_envio():
+    while True:
+        try:
+            n = envia_uma_vez()
+            ENVIO["ultimo_ok"], ENVIO["erro"] = int(time.time()), None
+            if os.environ.get("PONTO_LOG"):
+                print("enviado: %d turnos pra %s" % (n, DESTINO), flush=True)
+        except urllib.error.HTTPError as e:
+            ENVIO["erro"] = "o central respondeu %d%s" % (
+                e.code, " (senha errada?)" if e.code == 401 else "")
+        except Exception as e:   # sem rede, DNS, timeout: tenta de novo depois
+            ENVIO["erro"] = str(getattr(e, "reason", None) or e)[:160]
+        if ENVIO["erro"]:
+            print("envio falhou: %s" % ENVIO["erro"], file=sys.stderr, flush=True)
+        _acorda_envio.wait(ENVIAR_A_CADA)
+        if _acorda_envio.is_set():
+            _acorda_envio.clear()
+            time.sleep(3)   # junta "parou" + "comecou" de uma troca num envio so
 
 
 # ------------------------------------------------------------------ a conta da semana
@@ -432,7 +564,7 @@ def semana(quando=None):
         except (TypeError, ValueError):
             meta = META_PADRAO
         linhas = [dict(r) for r in c.execute(
-            "SELECT id,inicio,fim,obs,tema FROM turnos"
+            "SELECT id,inicio,fim,obs,tema,origem FROM turnos"
             " WHERE inicio>=? AND inicio<? ORDER BY inicio", (ini, fim_semana))]
         lista_temas = temas(c)
         fora = set(t for t in temas_fora(c) if t in lista_temas)
@@ -472,7 +604,9 @@ def semana(quando=None):
             por_dia_fora[dia] += dur / 3600.0
         else:
             total += dur
-            if t["fim"] is not None:
+            # turno aberto de outra maquina entra como fechado ate agora: a
+            # tela so faz andar o cronometro DAQUI
+            if t["fim"] is not None or t.get("origem"):
                 fechadas += dur
                 if dia == hoje_i:
                     fechadas_hoje += dur
@@ -688,6 +822,7 @@ class Ponto(BaseHTTPRequestHandler):
         if u.path == "/api/semana":
             s = semana()
             s["com_senha"] = bool(SENHA)   # o painel so mostra "Sair" se houver
+            s["envio"] = ENVIO if DESTINO else None
             return self._json(200, s)
         if u.path == "/api/historico":
             n = max(1, min(104, _inteiro((q.get("n") or [""])[0]) or 12))
@@ -716,13 +851,24 @@ class Ponto(BaseHTTPRequestHandler):
             if acao not in ("entra", "sai", "alterna", "troca"):
                 return self._json(400, {"erro": "acao: entra, sai, alterna ou troca"})
             r = bate_ponto(acao, d.get("tema"), d.get("quando"))
+            _acorda_envio.set()   # manda ja, nao espera o proximo ciclo
             r["semana"] = semana()
             r["texto"] = texto_ponto(r, r["semana"])
             return self._json(200, r)
+        if u.path == "/api/receber":
+            if not SENHA:
+                # receber de qualquer um sem senha seria deixar a internet
+                # escrever no seu ponto
+                return self._json(403, {"erro": "o central precisa de PONTO_SENHA"})
+            try:
+                return self._json(200, receber(d))
+            except ValueError as e:
+                return self._json(400, {"erro": str(e)})
         if u.path == "/api/turnos":
             tid = cria_turno(d)
             if not tid:
                 return self._json(400, {"erro": "precisa de inicio"})
+            _acorda_envio.set()
             return self._json(201, {"ok": True, "id": tid, "semana": semana()})
         if u.path == "/api/temas":
             return self._json(200, {"ok": True, "temas": muda_temas(d.get("temas")),
@@ -756,7 +902,9 @@ class Ponto(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return self._json(400, {"erro": "corpo invalido"})
         t = muda_turno(tid, d)
-        return self._json(200 if t else 400, {"ok": bool(t), "turno": t, "semana": semana()})
+        _acorda_envio.set()
+        return self._json(200 if t else 400, {"ok": bool(t), "turno": t, "semana": semana(),
+                                              "erro": None if t else "turno de outra maquina: conserte la"})
 
     def do_DELETE(self):
         u = urlparse(self.path)
@@ -765,7 +913,9 @@ class Ponto(BaseHTTPRequestHandler):
         tid = self._id_turno(u)
         if not tid:
             return self._json(404, {"erro": "rota desconhecida"})
-        apaga_turno(tid)
+        if not apaga_turno(tid):
+            return self._json(400, {"erro": "turno de outra maquina: apague la"})
+        _acorda_envio.set()
         return self._json(200, {"ok": True, "semana": semana()})
 
     def _entrar(self, d):
@@ -796,6 +946,13 @@ def main():
     if not SENHA and aberto_pra_rede:
         print("AVISO: sem PONTO_SENHA e escutando na rede. Em casa/Tailscale tudo bem;"
               " numa VPS defina PONTO_SENHA e ponha HTTPS na frente.", flush=True)
+    if DESTINO:
+        if DESTINO.startswith("http://") and not any(
+                h in DESTINO for h in ("localhost", "127.0.0.1", "192.168.", "10.", "100.")):
+            print("AVISO: enviando por http pra internet - a senha vai aberta. Use https.",
+                  flush=True)
+        print("Enviando pra %s a cada %ds como '%s'" % (DESTINO, ENVIAR_A_CADA, NOME), flush=True)
+        threading.Thread(target=laco_envio, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

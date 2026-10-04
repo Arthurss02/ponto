@@ -36,6 +36,10 @@
   .con i{width:7px;height:7px;border-radius:50%;background:var(--dim2)}
   .con.on i{background:var(--ok)}
   .con.off{color:var(--warn)} .con.off i{background:var(--warn)}
+  .envio{font-size:12px;color:var(--dim);padding:3px 10px;border-radius:99px;border:1px solid var(--line);background:var(--card)}
+  .envio.erro{color:var(--warn);border-color:#efdcaa;background:var(--warn-bg)}
+  .tabela .maq{display:inline-block;font-size:11px;color:var(--dim);border:1px solid var(--line2);border-radius:99px;padding:0 7px;margin-left:6px}
+  .tabela .ro{color:var(--dim)}
   .topo .links{margin-left:auto;display:flex;gap:14px;font-size:13px}
   .topo .links a{color:var(--dim);text-decoration:none}
   .topo .links a:hover{color:var(--txt)}
@@ -141,6 +145,7 @@
   <div class="topo">
     <h1><img src="icone-192.png" alt="">Ponto</h1>
     <div class="con" id="con"><i></i><span>conectando</span></div>
+    <div class="envio" id="envio" hidden></div>
     <div class="links">
       <a href="app">App do celular</a>
       <a href="api/exportar.csv">Exportar CSV</a>
@@ -404,6 +409,14 @@ function pintaTurnos(){
   $("turnos").innerHTML='<tr><th>Dia</th><th>Início</th><th>Fim</th><th>Duração</th><th>Tema</th><th>Anotação</th><th></th></tr>'+
     TURNOS.map(function(x){
       var dur = (x.fim||t)-x.inicio;
+      if(x.origem){
+        /* veio de outra maquina: so ela conserta, senao o proximo envio desfaz */
+        return '<tr title="Turno de '+esc(x.origem)+' — conserte lá">'+
+          '<td>'+DIAS[(new Date(x.inicio*1000).getDay()+6)%7]+' '+ddmm(x.inicio)+'<span class="maq">'+esc(x.origem)+'</span></td>'+
+          '<td class="ro num">'+hhmm(x.inicio)+'</td><td class="ro num">'+(x.fim?hhmm(x.fim):'—')+'</td>'+
+          '<td class="dur num'+(x.fim?'':' rodando')+'">'+(x.fim?hm(dur/3600):'rodando')+'</td>'+
+          '<td class="ro">'+esc(x.tema)+'</td><td class="ro">'+esc(x.obs)+'</td><td></td></tr>';
+      }
       return '<tr data-id="'+x.id+'">'+
         '<td>'+DIAS[(new Date(x.inicio*1000).getDay()+6)%7]+' '+ddmm(x.inicio)+'</td>'+
         '<td><input type="datetime-local" data-campo="inicio" value="'+local(x.inicio)+'" aria-label="Início"></td>'+
@@ -507,9 +520,24 @@ function pintaCon(){
   c.className="con "+(ONLINE===true?"on":ONLINE===false?"off":"");
   c.querySelector("span").textContent = ONLINE===true?"ao vivo":ONLINE===false?"sem conexão":"conectando";
 }
+function pintaEnvio(){
+  var el=$("envio"), e=W.envio;
+  el.hidden=!e; if(!e) return;
+  var host=e.destino.replace(/^https?:\/\//,"");
+  if(e.erro){
+    el.className="envio erro"; el.textContent="Não enviou pra "+host+": "+e.erro;
+  }else if(e.ultimo_ok){
+    var min=Math.max(0,Math.round((agora()-e.ultimo_ok)/60));
+    el.className="envio"; el.textContent="Enviado pra "+host+(min<1?" agora":" há "+min+" min");
+  }else{
+    el.className="envio"; el.textContent="Enviando pra "+host+"…";
+  }
+  el.title="Esta máquina aparece lá como “"+e.nome+"”";
+}
 function tudo(forca){
   if(!W) return;
   $("sair").hidden=!W.com_senha;
+  pintaEnvio();
   pintaAgora(); pintaSemana(); pintaDias(); pintaHist(); pintaAjustes(forca);
 }
 async function busca(){

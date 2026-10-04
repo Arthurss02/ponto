@@ -5,3 +5,4 @@ dados/
 __pycache__/
 *.pyc
 .DS_Store
+ponto.env

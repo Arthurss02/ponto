@@ -67,6 +67,31 @@ certificado sozinho — veja `extras/Caddyfile`. Com HTTPS o app do celular abre
 até sem internet (service worker) e o cookie de login vai só por conexão segura.
 Nesse caso deixe o Ponto escutando só local: `PONTO_HOST=127.0.0.1`.
 
+## Várias máquinas mandando pra um Ponto central
+
+Cada lugar (notebook, PC do trabalho, VPS) roda o seu Ponto e funciona sozinho,
+mesmo sem internet. Se você quiser ver tudo junto num lugar só, aponte essas
+máquinas pra um **Ponto central** — que é este mesmo programa, rodando com
+`PONTO_SENHA` num endereço com HTTPS.
+
+Numa máquina nova:
+
+```bash
+git clone https://github.com/Arthurss02/ponto.git && cd ponto
+cp ponto.env.exemplo ponto.env      # preencha PONTO_ENVIAR_PARA e PONTO_ENVIAR_SENHA
+python3 servidor/ponto.py
+```
+
+- Envia a cada 5 minutos (`PONTO_ENVIAR_A_CADA`) e também logo depois de cada
+  batida ou conserto. Sem rede, tenta de novo no próximo ciclo; nada se perde.
+- A primeira vez manda o histórico inteiro; depois, as últimas 5 semanas.
+  Conserto e turno apagado aqui chegam lá; mandar duas vezes não duplica.
+- No central, cada turno aparece com o nome da máquina (`PONTO_NOME`, padrão o
+  nome do computador) e só pode ser consertado na máquina de origem.
+- O topo do painel mostra se o último envio deu certo.
+- Desligado por padrão: quem clonar o repositório não manda nada pra lugar
+  nenhum sem configurar.
+
 ## Pôr o app na tela de início do celular
 
 - **iPhone:** abra `/app` no Safari → botão Compartilhar → **Adicionar à Tela de Início**.
@@ -104,6 +129,13 @@ Tudo por variável de ambiente:
 | `PONTO_SENHA` | vazio | pede senha em tudo. Trocar a senha desloga todos os aparelhos |
 | `TZ` | do sistema | fuso: a semana vira na segunda 00:00 deste fuso |
 | `PONTO_LOG` | vazio | qualquer valor liga o log de cada requisição |
+| `PONTO_ENVIAR_PARA` | vazio | endereço do Ponto central (liga o envio) |
+| `PONTO_ENVIAR_SENHA` | vazio | a `PONTO_SENHA` do central |
+| `PONTO_ENVIAR_A_CADA` | `300` | segundos entre envios (mínimo 30) |
+| `PONTO_NOME` | nome do PC | como esta máquina aparece no central |
+
+Tudo isso também pode ficar num arquivo `ponto.env` na pasta do projeto
+(veja `ponto.env.exemplo`).
 
 Meta da semana (padrão 40h) e temas (até 6) mudam pelo painel.
 
@@ -147,6 +179,7 @@ CSV (link **Exportar CSV**).
 | `POST /api/meta` | `{"horas": 40}` |
 | `GET /api/historico?n=12` | horas das últimas n semanas |
 | `GET /api/exportar.csv` | tudo em CSV |
+| `POST /api/receber` | (central) `{"origem", "desde", "turnos": [...]}` — troca os turnos daquela máquina a partir de `desde` |
 
 ## Desenvolvimento
 

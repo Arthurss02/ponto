@@ -18,6 +18,8 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASTA = tempfile.mkdtemp(prefix="ponto-teste-")
 os.environ["PONTO_BANCO"] = os.path.join(PASTA, "ponto.db")
 os.environ.pop("PONTO_SENHA", None)
+os.environ["PONTO_ENV"] = ""          # nao ler o ponto.env de quem roda os testes
+os.environ.pop("PONTO_ENVIAR_PARA", None)
 
 spec = importlib.util.spec_from_file_location("ponto", os.path.join(RAIZ, "servidor", "ponto.py"))
 ponto = importlib.util.module_from_spec(spec)
@@ -146,6 +148,42 @@ class Semana(Base):
         self.assertEqual(t["fim"], t["inicio"])
 
 
+class VariasMaquinas(Base):
+    def lote(self, desde, *turnos):
+        return {"origem": "oficina", "desde": desde,
+                "turnos": [{"id": i + 1, "inicio": a, "fim": b, "tema": "Trabalho"}
+                           for i, (a, b) in enumerate(turnos)]}
+
+    def test_receber_duas_vezes_nao_duplica_e_reflete_apagado(self):
+        a, b = (ts(2026, 10, 5, 8), ts(2026, 10, 5, 12)), (ts(2026, 10, 6, 8), ts(2026, 10, 6, 10))
+        ponto.receber(self.lote(0, a, b))
+        ponto.receber(self.lote(0, a, b))
+        self.assertEqual(len(self.turnos()), 2)
+        ponto.receber(self.lote(0, a))            # b foi apagado la
+        self.assertEqual(len(self.turnos()), 1)
+        self.assertAlmostEqual(ponto.semana(ts(2026, 10, 7, 12))["horas"], 4.0)
+
+    def test_janela_nao_apaga_o_que_veio_antes_dela(self):
+        velho = (ts(2026, 9, 1, 8), ts(2026, 9, 1, 9))
+        ponto.receber(self.lote(0, velho))
+        ponto.receber(self.lote(ts(2026, 9, 20), (ts(2026, 10, 5, 8), ts(2026, 10, 5, 9))))
+        self.assertEqual(len(self.turnos()), 2)
+
+    def test_turno_de_fora_e_so_leitura_e_nao_e_o_cronometro_daqui(self):
+        agora = int(time.time())
+        ponto.receber(self.lote(0, (agora - 600, None)))   # rodando la
+        tid = self.turnos()[0]["id"]
+        self.assertIsNone(ponto.muda_turno(tid, {"fim": agora}))
+        self.assertFalse(ponto.apaga_turno(tid))
+        r = ponto.bate_ponto("entra", "Estudo")
+        self.assertFalse(r.get("ja_estava"))
+        self.assertTrue(ponto.semana()["rodando"])
+
+    def test_receber_sem_origem_e_recusado(self):
+        with self.assertRaises(ValueError):
+            ponto.receber({"turnos": []})
+
+
 class Http(Base):
     @classmethod
     def setUpClass(cls):
@@ -192,6 +230,26 @@ class Http(Base):
         biscoito = "%s=%s" % (ponto.COOKIE, ponto.ficha())
         self.assertEqual(self.pede("GET", "/api/semana", cab={"Cookie": biscoito})[0], 200)
         self.assertEqual(self.pede("GET", "/api/semana", cab={"Cookie": "ponto=errado"})[0], 401)
+
+    def test_central_sem_senha_nao_recebe(self):
+        self.assertEqual(self.pede("POST", "/api/receber", {"origem": "x", "turnos": []})[0], 403)
+
+    def test_envio_chega_no_central(self):
+        ponto.SENHA = "central"
+        agora = int(time.time())
+        ponto.cria_turno({"inicio": agora - 3600, "fim": agora - 60, "tema": "Trabalho"})
+        ponto.DESTINO, ponto.DESTINO_SENHA = self.url, "errada"
+        try:
+            with self.assertRaises(urllib.error.HTTPError):
+                ponto.envia_uma_vez()
+            ponto.DESTINO_SENHA = "central"
+            self.assertEqual(ponto.envia_uma_vez(), 1)
+            ponto.envia_uma_vez()                           # de novo: nao duplica
+        finally:
+            ponto.DESTINO, ponto.DESTINO_SENHA = "", ""
+        # mesmo banco nos dois papeis: o daqui (origem '') e a copia recebida
+        origens = sorted(t["origem"] for t in self.turnos())
+        self.assertEqual(origens, ["", ponto.NOME])
 
     def test_arquivo_fora_da_lista_nao_sai(self):
         self.assertEqual(self.pede("GET", "/../servidor/ponto.py")[0], 404)

@@ -9,5 +9,9 @@ services:
       TZ: America/Sao_Paulo
       # numa VPS isto e obrigatorio. Troque por uma senha sua.
       PONTO_SENHA: troque-esta-senha
+      # mandar os turnos daqui pra um Ponto central (opcional)
+      # PONTO_ENVIAR_PARA: https://ponto.seudominio.com
+      # PONTO_ENVIAR_SENHA: senha-do-central
+      # PONTO_NOME: vps
     volumes:
       - ./dados:/dados
