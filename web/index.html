@@ -181,7 +181,7 @@
   </div>
 
   <section class="bloco" id="maquinas-bloco" hidden>
-    <h2>Outras máquinas <small>mandam os turnos pra cá; as que aceitam comandos dá pra controlar daqui</small></h2>
+    <h2>Outras máquinas <small>mandam os turnos pra cá</small></h2>
     <div class="maquinas" id="maquinas"></div>
   </section>
 
@@ -600,8 +600,8 @@ function pintaMaquinas(){
       bts='<div class="maq-bts">'+bts+'</div>';
     }else{
       bts='<div class="maq-nota">'+(e.aceita_comandos
-        ? 'Aceita comandos, mas não está conectada agora. O que você pedir fica na fila até ela voltar (vale 7 dias).'
-        : 'Só manda os turnos. Pra controlar daqui, ponha PONTO_ACEITAR_COMANDOS=1 no ponto.env dela.')+'</div>';
+        ? 'Ouve comandos, mas não está conectada agora. O pedido fica na fila até ela voltar (vale 7 dias).'
+        : 'Só manda os turnos.')+'</div>';
       if(e.aceita_comandos){
         bts += '<div class="maq-bts">'+(e.rodando
           ? '<button class="bt parar" data-maq="'+esc(m.nome)+'" data-acao="sai">Parar</button>'

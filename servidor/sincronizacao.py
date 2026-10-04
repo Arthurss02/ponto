@@ -7,7 +7,9 @@ se registra no nucleo (`instalar`) e acrescenta:
 
   - o ENVIO dos turnos desta maquina pra um central, de tempos em tempos;
   - o RECEBER, pro central juntar os turnos de varias maquinas;
-  - os COMANDOS, pro central controlar esta maquina (so acoes do Ponto).
+  - os COMANDOS: a estrutura pro central mandar pedidos pra esta maquina. A
+    EXECUCAO esta desligada - a maquina recebe e responde, mas nao faz nada
+    (veja executa_comando).
 
 Configuracao (por variavel de ambiente ou pelo ponto.env):
 
@@ -15,11 +17,13 @@ Configuracao (por variavel de ambiente ou pelo ponto.env):
     PONTO_ENVIAR_SENHA       a PONTO_SENHA do central
     PONTO_ENVIAR_A_CADA      segundos entre envios (padrao 300, minimo 30)
     PONTO_NOME               nome desta maquina no central (padrao: hostname)
-    PONTO_ACEITAR_COMANDOS=1 deixa o central controlar esta maquina
+    PONTO_ACEITAR_COMANDOS=1 a maquina passa a buscar comandos no central
+                             (hoje so recebe e confirma; nao executa nada)
 
 TODA a seguranca do lado central mora aqui (procure por "SEGURANCA:"):
- - O SERVIDOR NAO EXECUTA SHELL: a lista COMANDOS e fechada e so mexe no Ponto;
-   nao ha os.system/subprocess/eval/exec neste arquivo nem no nucleo.
+ - O SERVIDOR NAO EXECUTA SHELL, e hoje nao executa comando nenhum: a maquina
+   recebe e confirma, mas executa_comando nao faz nada. A lista COMANDOS e
+   fechada; nao ha os.system/subprocess/eval/exec aqui nem no nucleo.
  - o central nao aceita receber turno nem comando sem PONTO_SENHA;
  - tamanho de tudo que chega e limitado (turnos, estado, dados de comando);
  - cada comando roda uma vez so, mesmo se a resposta se perder;
@@ -49,8 +53,8 @@ _acorda_envio = threading.Event()
 ENVIO = {"destino": DESTINO, "nome": NOME, "ultimo_ok": None, "erro": None}
 
 # SEGURANCA: O SERVIDOR NAO EXECUTA SHELL. Esta e a lista fechada de tudo que o
-#   central pode pedir pra outra maquina, e tudo mexe so no Ponto (veja
-#   executa_comando). Nao existe os.system, subprocess, eval ou exec em lugar
+#   central pode pedir pra outra maquina (hoje so e recebido, nao executado -
+#   veja executa_comando). Nao existe os.system, subprocess, eval ou exec em lugar
 #   nenhum. Se um dia alguem invadir o central, ganha o seu ponto, nao o
 #   computador das maquinas. Antes de acrescentar um item aqui, pense: "e se o
 #   central for de outra pessoa?"
@@ -300,43 +304,19 @@ def maquinas():
     return lista
 
 
-# SEGURANCA: segunda barreira, do lado da maquina: mesmo que o central mande
-#   qualquer coisa, so o que esta neste if/elif roda; cada ramo chama exatamente
-#   a mesma funcao do nucleo que o painel local chamaria. O resto vira "comando
-#   desconhecido". Nada aqui toca o sistema operacional.
+# SEGURANCA: a EXECUCAO DE COMANDOS ESTA DESLIGADA. A maquina recebe o comando,
+#   registra e responde ao central, mas nao faz nada com ele. Toda a estrutura
+#   em volta (fila, busca pendurada, execucao unica, resultado) continua
+#   funcionando - pra ligar de novo, so escrever aqui o que cada acao faz,
+#   sempre chamando funcoes do Ponto (P.bate_ponto, P.cria_turno...), nunca o
+#   sistema operacional.
 def executa_comando(cmd):
-    acao, d = cmd.get("acao"), cmd.get("dados") or {}
-    if not isinstance(d, dict):
-        d = {}
-    try:
-        if acao == "ponto":
-            qual = d.get("acao") or "alterna"
-            # SEGURANCA: acao de ponto validada de novo na maquina.
-            if qual not in ("entra", "sai", "alterna", "troca"):
-                return {"ok": False, "erro": "acao de ponto invalida"}
-            # a hora e a do clique no central: comando que esperou a maquina
-            # ligar nao comeca o turno no momento em que ela ligou
-            r = P.bate_ponto(qual, d.get("tema"), cmd.get("criado_em"))
-            return {"ok": bool(r.get("ok")), "texto": P.texto_ponto(r, P.semana())}
-        if acao == "lanca_turno":
-            tid = P.cria_turno(d)
-            return {"ok": bool(tid), "texto": "turno lan\u00e7ado" if tid else "precisa de inicio"}
-        if acao == "muda_turno":
-            campos = {k: d[k] for k in ("inicio", "fim", "tema", "obs") if k in d}
-            t = P.muda_turno(P._inteiro(d.get("id")) or 0, campos)
-            return {"ok": bool(t), "texto": "turno consertado" if t else "turno n\u00e3o encontrado"}
-        if acao == "apaga_turno":
-            ok = P.apaga_turno(P._inteiro(d.get("id")) or 0)
-            return {"ok": ok, "texto": "turno apagado" if ok else "turno n\u00e3o encontrado"}
-        if acao == "temas":
-            return {"ok": True, "texto": "temas: " + ", ".join(P.muda_temas(d.get("temas")))}
-        if acao == "temas_fora":
-            return {"ok": True, "texto": "n\u00e3o contam: " + (", ".join(P.muda_temas_fora(d.get("temas"))) or "nenhum")}
-        if acao == "meta":
-            return {"ok": True, "texto": "meta %s por semana" % P.hm_txt(P.muda_meta(d.get("horas")))}
-    except (TypeError, ValueError) as e:
-        return {"ok": False, "erro": "dados invalidos: %s" % e}
-    return {"ok": False, "erro": "comando desconhecido"}
+    acao = cmd.get("acao")
+    # SEGURANCA: mesmo desligado, so reconhece o que esta na lista fechada.
+    if acao not in COMANDOS:
+        return {"ok": False, "erro": "comando desconhecido"}
+    pass   # aqui entraria a execucao de cada acao
+    return {"ok": True, "texto": "recebido (execu\u00e7\u00e3o desligada)"}
 
 
 def atende_comandos(lista):

@@ -92,32 +92,18 @@ python3 servidor/ponto.py
 - Desligado por padrão: quem clonar o repositório não manda nada pra lugar
   nenhum sem configurar. O endereço do central é você que escolhe.
 
-### Controlar as máquinas pelo central
+### Comandos do central (execução desligada)
 
-Com `PONTO_ACEITAR_COMANDOS=1` no `ponto.env` de uma máquina, o painel do
-central ganha um cartão dela em **Outras máquinas**, com o que está rodando lá e
-botões pra começar, trocar e parar. O comando chega em 1–2 segundos.
+Com `PONTO_ACEITAR_COMANDOS=1` no `ponto.env` de uma máquina, ela fica
+ouvindo o central e aparece com o status "ouvindo" no painel dele, em
+**Outras máquinas**. Os botões de lá põem um pedido na fila, e a máquina
+recebe e confirma em 1–2 segundos — mas **não executa nada**: a resposta
+é "recebido (execução desligada)".
 
-- A máquina é que pergunta ao central (uma conexão que fica esperando até 25 s
-  e volta assim que tem comando). Por isso funciona atrás de roteador, 4G ou
-  rede de empresa, sem abrir porta nenhuma.
-- Máquina desligada: o comando fica na fila e roda quando ela voltar (até 7
-  dias). Bater ponto usa a hora do clique no central, não a hora em que ela ligou.
-- Cada comando roda uma vez só, mesmo se a resposta se perder no caminho.
-- **Só ações do Ponto**: bater ponto, lançar/consertar/apagar turno, temas,
-  "não conta" e meta. Não existe comando de sistema — se alguém invadisse o
-  central, não ganharia o computador de ninguém.
-
-Pela API (pra script ou atalho), com a senha do central:
-
-```
-POST /api/comandos
-{"origem": "notebook", "acao": "ponto", "dados": {"acao": "entra", "tema": "Estudo"}}
-```
-
-`acao` pode ser `ponto` (`dados.acao`: entra, sai, alterna, troca),
-`lanca_turno`, `muda_turno` (`dados.id` = id do turno na máquina), `apaga_turno`,
-`temas`, `temas_fora` ou `meta`.
+A estrutura inteira continua pronta (fila, conexão que espera até 25 s,
+execução única, resultado de volta), e só a função `executa_comando` em
+`servidor/sincronizacao.py` está vazia. Pra ligar algum comando no futuro, é
+ali, chamando sempre funções do Ponto — nunca o sistema operacional.
 
 ## Pôr o app na tela de início do celular
 
@@ -160,7 +146,7 @@ Tudo por variável de ambiente:
 | `PONTO_ENVIAR_SENHA` | vazio | a `PONTO_SENHA` do central |
 | `PONTO_ENVIAR_A_CADA` | `300` | segundos entre envios (mínimo 30) |
 | `PONTO_NOME` | nome do PC | como esta máquina aparece no central |
-| `PONTO_ACEITAR_COMANDOS` | vazio | `1` deixa o central controlar esta máquina |
+| `PONTO_ACEITAR_COMANDOS` | vazio | `1` faz a máquina receber os pedidos do central (sem executar) |
 
 Tudo isso também pode ficar num arquivo `ponto.env` na pasta do projeto
 (veja `ponto.env.exemplo`).

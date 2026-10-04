@@ -76,8 +76,10 @@ cabeçalho do arquivo pra lista completa; os pontos de segurança:
 - o central recusa receber turno ou comando sem `PONTO_SENHA` (403);
 - tamanhos limitados: lote de 20.000 turnos, estado de 4 KB, dados de
   comando de 8 KB, origem de 40 caracteres;
-- a validação do comando acontece duas vezes (ao entrar na fila e ao
-  executar), e cada comando roda uma vez só;
+- **a execução de comandos está desligada**: a máquina recebe, confirma e
+  não faz nada (`executa_comando` só tem um `pass`). O comando ainda é
+  validado contra a lista ao entrar na fila e ao chegar na máquina, e cada
+  um é confirmado uma vez só;
 - uma máquina só mexe na própria fila (`WHERE origem=?`);
 - quem envia autentica no central com `Bearer` (a senha dele).
 
