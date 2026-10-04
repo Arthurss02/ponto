@@ -1,7 +1,6 @@
 # Mapa dos arquivos (pra quem vai mexer no código)
 
-Tudo roda com a biblioteca padrão do Python 3.9+. Rode os testes antes e
-depois de mudar qualquer coisa: `python3 -m unittest discover -s tests -v`.
+Tudo roda com a biblioteca padrão do Python 3.9+.
 
 ## servidor/ponto.py
 
@@ -96,18 +95,10 @@ e comandos. Está dividido em seções marcadas com `# ----`.
 - **app.webmanifest, icone-*.png**: instalação na tela de início. Abrem sem
   senha porque o celular pede esses arquivos antes de ter o cookie.
 
-## tests/test_ponto.py
+## ferramentas/icone.py
 
-São 30 testes, divididos em batidas, semana, várias máquinas, comandos e
-HTTP (senha, 403 do central, arquivo fora da lista). Cada teste usa um
-banco temporário, e `PONTO_ENV=""` impede que o seu `ponto.env` vaze pros
-testes. Para cada regra nova, escreva o teste junto.
-
-## ferramentas/
-
-- **demo.py**: enche um banco com 8 semanas inventadas. Se você não passar
-  `PONTO_BANCO`, ele se recusa a rodar, pra não sujar o banco de verdade.
-- **icone.py**: gera os ícones PNG à mão (zlib + struct, sem PIL).
+Gera os ícones PNG à mão (zlib + struct, sem PIL). Só é preciso se quiser
+redesenhar o ícone; os PNGs prontos já estão em `web/`.
 
 ## Instalação e configuração
 

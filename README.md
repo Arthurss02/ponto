@@ -217,13 +217,8 @@ CSV (link **Exportar CSV**).
 
 O que cada arquivo faz e quais verificações de segurança tem: [`ARQUIVOS.md`](ARQUIVOS.md).
 
-```bash
-python3 -m unittest discover -s tests -v
-
-# brincar com dados inventados, sem encostar no banco de verdade
-PONTO_BANCO=/tmp/demo.db python3 ferramentas/demo.py
-PONTO_BANCO=/tmp/demo.db python3 servidor/ponto.py
-```
+Pra testar sem encostar no seu banco de verdade, rode com outro arquivo:
+`PONTO_BANCO=/tmp/teste.db python3 servidor/ponto.py`.
 
 `ferramentas/icone.py` redesenha os ícones do app (PNG gerado na mão, sem PIL).
 
