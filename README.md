@@ -215,7 +215,10 @@ CSV (link **Exportar CSV**).
 
 ## Desenvolvimento
 
-O que cada arquivo faz e quais verificações de segurança tem: [`ARQUIVOS.md`](ARQUIVOS.md).
+O Ponto de uma máquina é o `servidor/ponto.py`; tudo sobre o central (enviar,
+receber, comandos) e a segurança disso fica separado em
+`servidor/sincronizacao.py` — apague esse arquivo e o Ponto roda sozinho. O
+que cada arquivo faz e as verificações de segurança: [`ARQUIVOS.md`](ARQUIVOS.md).
 
 Pra testar sem encostar no seu banco de verdade, rode com outro arquivo:
 `PONTO_BANCO=/tmp/teste.db python3 servidor/ponto.py`.

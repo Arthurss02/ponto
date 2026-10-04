@@ -5,10 +5,16 @@ Tudo roda com a biblioteca padrão do Python 3.9+.
 Cada proteção também está marcada no próprio código com um comentário
 `SEGURANCA:`. Pra listar todas: `grep -rn SEGURANCA servidor web`.
 
+O servidor tem dois arquivos: **`ponto.py`** é o Ponto de uma máquina só
+(não sabe o que é central) e **`sincronizacao.py`** é a parte opcional que
+liga essa máquina a um central. Apague o segundo e o primeiro roda sozinho.
+
 ## servidor/ponto.py
 
-O servidor inteiro: banco, regras da semana, API, login, envio pro central
-e comandos. Está dividido em seções marcadas com `# ----`.
+O Ponto de uma máquina: banco, regras da semana, API, login. Dividido em
+seções marcadas com `# ----`. No fim tem os **GANCHOS**: listas vazias onde
+o `sincronizacao.py` se pendura (banco, semana, rota, mudou, subir). Sem
+ele, as listas ficam vazias e nada muda.
 
 - **Configuração (topo)**: `le_arquivo_env` lê o `ponto.env`, mas só aceita
   chaves `PONTO_*` e `TZ`, e nunca sobrescreve uma variável de ambiente que
@@ -27,24 +33,10 @@ e comandos. Está dividido em seções marcadas com `# ----`.
   do início, vira duração zero. Turno vindo de outra máquina
   (`origem<>''`) não pode ser editado nem apagado aqui; só a máquina de
   origem conserta.
-- **várias máquinas**: em `receber`, a origem tem até 40 caracteres, cada
-  lote tem no máximo 20.000 turnos, e turno anterior ao `desde` é
-  descartado. O lote substitui os turnos daquela origem no período, então
-  receber o mesmo lote duas vezes não duplica nada. Já `envia_uma_vez` só
-  manda os turnos locais, pra duas máquinas não ficarem reenviando uma pra
-  outra.
-- **comandos do central**: a lista do que pode ser pedido é fechada
-  (`COMANDOS`) e só mexe no Ponto; não existe execução de comando de
-  sistema. A validação acontece duas vezes, quando o comando entra na fila
-  (`enfileira_comando`) e quando é executado (`executa_comando`). Além
-  disso:
-  - os dados de um comando têm até 8 KB;
-  - o comando que ninguém buscou caduca em 7 dias;
-  - a espera da requisição pendurada é de no máximo 25 s;
-  - `atende_comandos` guarda o id de cada comando já executado (por 30
-    dias), pra não executar duas vezes;
-  - `registra_resultados` só marca comandos da própria origem, até 100 por
-    chamada.
+- **origem dos turnos**: a coluna `origem` em `turnos` marca de qual máquina
+  um turno veio (vazio = desta). Quem preenche é o `sincronizacao.py`; aqui
+  as colunas existem só pra que um turno recebido apareça certo e para
+  `muda_turno`/`apaga_turno` recusarem um turno de outra máquina.
 - **senha**: a sessão é um HMAC-SHA256 da `PONTO_SENHA`. Trocar a senha
   desloga todo mundo, porque não há tabela de sessões. Todas as comparações
   usam `hmac.compare_digest`. Aceita cookie ou `Authorization: Bearer`.
@@ -73,6 +65,24 @@ e comandos. Está dividido em seções marcadas com `# ----`.
   `Secure`);
 - não há usuários: um servidor, uma senha;
 - a senha fica em texto puro no ambiente ou no `ponto.env`.
+
+## servidor/sincronizacao.py
+
+Toda a parte do central, e **toda a segurança dela**, em um arquivo só:
+enviar os turnos pro central, receber (lado central), e os comandos. Veja o
+cabeçalho do arquivo pra lista completa; os pontos de segurança:
+- **o servidor não executa shell** (`COMANDOS` é uma lista fechada que só
+  mexe no Ponto; não há `os.system`, `subprocess`, `eval` nem `exec`);
+- o central recusa receber turno ou comando sem `PONTO_SENHA` (403);
+- tamanhos limitados: lote de 20.000 turnos, estado de 4 KB, dados de
+  comando de 8 KB, origem de 40 caracteres;
+- a validação do comando acontece duas vezes (ao entrar na fila e ao
+  executar), e cada comando roda uma vez só;
+- uma máquina só mexe na própria fila (`WHERE origem=?`);
+- quem envia autentica no central com `Bearer` (a senha dele).
+
+Ele se liga ao `ponto.py` só pelos GANCHOS, em `instalar()`. Não altera
+nenhuma regra do Ponto — só acrescenta rotas e os laços de fundo.
 
 ## web/
 
